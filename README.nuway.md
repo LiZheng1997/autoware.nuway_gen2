@@ -16,7 +16,7 @@ mkdir -p src
 vcs import src < repositories/autoware.repos   # 上游 32 仓库，全部钉死 tag/hash
 vcs import src < repositories/nuway.repos      # nuway_canbridge
 
-bash nuway/stage_packages.sh                   # 自带的 sensor_kit / vehicle 放进 src/
+bash nuway/stage_packages.sh                   # copy bundled sensor_kit / vehicle into src/
 bash patches/apply.sh                          # ★ 必须，见下
 
 sudo cp nuway/60-autoware-dds.conf /etc/sysctl.d/ && sudo sysctl --system
@@ -48,7 +48,8 @@ source nuway/setup_env.sh
 | `nuway/` | 环境变量、DDS sysctl、编译脚本 |
 | `docs/build-on-orin.md` | 完整 SOP：10 个步骤 + 13 个踩坑 + 排错索引 |
 
-`nuway_packages/` 下两个包来源 `uwa-rev/autoware_launch.nuway @ d11bea6 (2026-03-30)`，
+`nuway_packages/` 带有 `COLCON_IGNORE`，避免 colcon 同时发现
+它和 `src/nuway/` 里的副本而报 Duplicate package names。其下两个包来源 `uwa-rev/autoware_launch.nuway @ d11bea6 (2026-03-30)`，
 **随本仓库分发而非 vcs import**：该仓库同时包含一个 fork 版 `autoware_launch`，
 import 进来会与 1.9.0 自带的同名包冲突，导致 colcon
 `Duplicate package names not supported` 直接中止。建议后续拆成独立仓库。

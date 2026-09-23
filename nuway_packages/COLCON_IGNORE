@@ -1,0 +1,5 @@
+This directory is the version-controlled home of the nuway packages.
+nuway/stage_packages.sh copies them into src/nuway/ where colcon picks them up.
+
+Without this marker colcon discovers each package twice (here and under src/)
+and aborts with "Duplicate package names not supported" — building nothing.
