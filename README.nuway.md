@@ -44,7 +44,7 @@ source nuway/setup_env.sh
 | `repositories/nuway.repos` | nuway_canbridge（`canbridge_cpp@autoware`），URL 已从 `lee.github.com` 别名改为标准形式 |
 | `nuway_packages/nuway_sensor_kit_launch/` | 传感器套件（VLP-16 ×2 / 相机 ×2 / GNSS / IMU / ntrip） |
 | `nuway_packages/nuway_vehicle_launch/` | 车辆描述 |
-| `patches/` | cuda_blackboard 一行补丁；common_sensor_launch 的失真校正阈值（nuway 实车调过 0.01→0.07）+ 应用脚本 |
+| `patches/` | cuda_blackboard 一行补丁 + 应用脚本 |
 | `nuway/` | 环境变量、DDS sysctl、编译脚本 |
 | `docs/build-on-orin.md` | 完整 SOP：10 个步骤 + 13 个踩坑 + 排错索引 |
 
@@ -55,6 +55,26 @@ nuway 套件原有的 `common_sensor_launch` 已删除——1.9.0 的 `autoware_
 **随本仓库分发而非 vcs import**：该仓库同时包含一个 fork 版 `autoware_launch`，
 import 进来会与 1.9.0 自带的同名包冲突，导致 colcon
 `Duplicate package names not supported` 直接中止。建议后续拆成独立仓库。
+
+## common_cuda_sensor_launch 的定位
+
+零代码的纯集成包（`ament_auto_package(INSTALL_TO_SHARE launch config)`），
+算法全部来自 TIER IV 上游的 `autoware_cuda_pointcloud_preprocessor`。
+
+上游 README 写明该包的用途就是「用 GPU 版重新实现 `autoware_pointcloud_preprocessor`
+的裁剪 / 去畸变 / 环外点滤波」，所以 nuway 把 CPU 四件套注释掉换成单个 CUDA 节点，
+是跟随上游设计而非自创。
+
+nuway 提供的是上游 1.9.0 尚未提供的两件事：
+
+1. 把 CUDA 节点**组合进传感器容器**（与驱动同进程，多 MB 点云零拷贝）。
+   上游只有独立节点的 launch，输出话题默认值是 `test`，属冒烟测试而非生产接线。
+2. **实车车体裁剪框**（`crop_box.x∈[-0.5, 2.83]`、`y∈±0.748`、`z∈[0, 2.4]`、
+   `negative: true`）。上游的 `crop_box.*` 全是 0。
+
+已删除与上游逐字节相同、或未被 launch 加载的文件：
+`robosense_Bpearl/Helios.launch.xml`、`ring_outlier_filter_node.param.yaml`、
+`distortion_corrector_node.param.yaml`。升级 Autoware 时 diff 面越小越好。
 
 ## 已知待办
 

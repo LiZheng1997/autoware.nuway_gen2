@@ -11,6 +11,9 @@
   <buildtool_depend>ament_cmake_auto</buildtool_depend>
 
   <exec_depend>autoware_velodyne_monitor</exec_depend>
+  <exec_depend>autoware_cuda_pointcloud_preprocessor</exec_depend>
+  <exec_depend>autoware_glog_component</exec_depend>
+  <exec_depend>rclcpp_components</exec_depend>
   <exec_depend>nebula</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
