@@ -1,0 +1,19 @@
+/**:
+  ros__parameters:
+    base_frame: base_link
+    use_imu: true
+    enable_ring_outlier_filter: true # double check
+    distance_ratio: 1.03
+    object_length_threshold: 0.05
+    use_3d_distortion_correction: false
+    update_azimuth_and_distance: false
+    processing_time_threshold_sec: 0.07
+    timestamp_mismatch_fraction_threshold: 0.07
+
+    crop_box.min_x: [-0.5]
+    crop_box.min_y: [-0.748]
+    crop_box.min_z: [0.0]
+    crop_box.max_x: [2.83]
+    crop_box.max_y: [0.748]
+    crop_box.max_z: [2.4]
+    crop_box.negative: [true]

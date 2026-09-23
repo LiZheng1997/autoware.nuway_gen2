@@ -1,0 +1,27 @@
+Subject: [PATCH] cuda_blackboard: 用 cudaGetDevice 替代 cudaStreamGetDevice
+
+cudaStreamGetDevice 不仅需要 CUDA 12.8 的头文件，运行时还需要 12.8 的驱动。
+JetPack 6.x 的驱动最高是 CUDA 12.6，调用会返回
+cudaErrorCallRequiresNewerDriver (36)，导致 pointcloud_container 构造函数抛异常
+而 abort —— 点云预处理/拼接整条链消失，下游表现为
+  ndt_scan_matcher: No InputSource
+  /api/localization/initialize: align server failed
+极具误导性。
+
+stream_ 是紧邻两行前在当前设备上创建的，用 cudaGetDevice 取当前设备号等价，
+且无驱动版本要求。
+
+实测（Orin AGX / JetPack 6.2 / L4T R36.4.3）：打补丁前每轮固定死 1 个进程，
+打补丁后进程死亡 0、cudaError 0。
+---
+--- a/src/cuda_mem_pool_context.cpp
++++ b/src/cuda_mem_pool_context.cpp
+@@ -39,7 +39,7 @@
+   CUDA_BLACKBOARD_CHECK_CUDA_ERROR(cudaStreamCreateWithFlags(&free_stream_, cudaStreamNonBlocking));
+ 
+   int device_id = 0;
+-  CUDA_BLACKBOARD_CHECK_CUDA_ERROR(cudaStreamGetDevice(stream_, &device_id));
++  CUDA_BLACKBOARD_CHECK_CUDA_ERROR(cudaGetDevice(&device_id));
+ 
+   cudaMemPoolProps pool_props = {};
+   pool_props.allocType = cudaMemAllocationTypePinned;
