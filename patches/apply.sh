@@ -1,13 +1,25 @@
 #!/bin/bash
-# 在 vcs import 之后、colcon build 之前运行。
-# vcs import 会覆盖外部依赖的源码，所以补丁必须以 .patch 形式维护并每次重新施加。
+# Run after `vcs import`, before `colcon build`.
+# vcs import overwrites the imported sources, so every patch has to be
+# re-applied on each fresh import. Each step is idempotent.
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
 CB="$ROOT/src/universe/external/cuda_blackboard"
-[ -d "$CB" ] || { echo "未找到 $CB —— 请先执行 vcs import"; exit 1; }
+[ -d "$CB" ] || { echo "missing $CB - run vcs import first"; exit 1; }
 if grep -q 'cudaStreamGetDevice' "$CB/src/cuda_mem_pool_context.cpp"; then
   patch -p1 -d "$CB" < "$ROOT/patches/0001-cuda_blackboard-use-cudaGetDevice.patch"
-  echo "✔ cuda_blackboard 补丁已施加"
+  echo "✔ cuda_blackboard patched"
 else
-  echo "· cuda_blackboard 补丁已在，跳过"
+  echo "· cuda_blackboard already patched"
+fi
+
+AL="$ROOT/src/launcher/autoware_launch"
+P="$AL/sensor_kit/sample_sensor_kit_launch/common_sensor_launch/config/distortion_corrector_node.param.yaml"
+[ -f "$P" ] || { echo "missing $P - run vcs import first"; exit 1; }
+if grep -q 'processing_time_threshold_sec: 0.01' "$P"; then
+  patch -p1 -d "$AL" < "$ROOT/patches/0002-relax-distortion-corrector-thresholds.patch"
+  echo "✔ distortion corrector thresholds restored to the nUWAy values"
+else
+  echo "· distortion corrector thresholds already set"
 fi

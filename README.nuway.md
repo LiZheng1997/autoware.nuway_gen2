@@ -44,9 +44,11 @@ source nuway/setup_env.sh
 | `repositories/nuway.repos` | nuway_canbridge（`canbridge_cpp@autoware`），URL 已从 `lee.github.com` 别名改为标准形式 |
 | `nuway_packages/nuway_sensor_kit_launch/` | 传感器套件（VLP-16 ×2 / 相机 ×2 / GNSS / IMU / ntrip） |
 | `nuway_packages/nuway_vehicle_launch/` | 车辆描述 |
-| `patches/` | cuda_blackboard 一行补丁 + 应用脚本 |
+| `patches/` | cuda_blackboard 一行补丁；common_sensor_launch 的失真校正阈值（nuway 实车调过 0.01→0.07）+ 应用脚本 |
 | `nuway/` | 环境变量、DDS sysctl、编译脚本 |
 | `docs/build-on-orin.md` | 完整 SOP：10 个步骤 + 13 个踩坑 + 排错索引 |
+
+nuway 套件原有的 `common_sensor_launch` 已删除——1.9.0 的 `autoware_launch` 自带同名包（版本更新，0.52.0 vs 0.50.0，差异是上游重构），重复会让 colcon 中止。其中唯一的 nuway 定制（失真校正阈值）以 `patches/0002` 保留。
 
 `nuway_packages/` 带有 `COLCON_IGNORE`，避免 colcon 同时发现
 它和 `src/nuway/` 里的副本而报 Duplicate package names。其下两个包来源 `uwa-rev/autoware_launch.nuway @ d11bea6 (2026-03-30)`，

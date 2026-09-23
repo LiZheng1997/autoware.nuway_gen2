@@ -1,0 +1,24 @@
+Subject: [PATCH] common_sensor_launch: keep the nUWAy distortion corrector thresholds
+
+The nUWAy sensor kit shipped its own copy of common_sensor_launch, forked from
+an older upstream. That copy is dropped in favour of the one in 1.9.0, which is
+newer (0.52.0 vs 0.50.0) and whose other differences are upstream refactors
+(PathJoinSubstitution instead of eager os.path.join).
+
+The one genuine nUWAy change is carried here: both distortion corrector
+thresholds were relaxed from 0.01 to 0.07 on the vehicle. Keeping the validated
+values is the safer default.
+
+Revisit once the tighter upstream thresholds are shown to hold on this stack -
+if the diagnostics stay quiet at 0.01, drop this patch.
+---
+--- a/sensor_kit/sample_sensor_kit_launch/common_sensor_launch/config/distortion_corrector_node.param.yaml
++++ b/sensor_kit/sample_sensor_kit_launch/common_sensor_launch/config/distortion_corrector_node.param.yaml
+@@ -4,6 +4,6 @@
+     has_static_tf_only: false
+     use_3d_distortion_correction: false
+     update_azimuth_and_distance: false
+-    processing_time_threshold_sec: 0.01
+-    timestamp_mismatch_fraction_threshold: 0.01
++    processing_time_threshold_sec: 0.07
++    timestamp_mismatch_fraction_threshold: 0.07
