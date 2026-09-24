@@ -44,7 +44,7 @@ source nuway/setup_env.sh
 | `repositories/nuway.repos` | nuway_canbridge（`canbridge_cpp@autoware`），URL 已从 `lee.github.com` 别名改为标准形式 |
 | `nuway_packages/nuway_sensor_kit_launch/` | 传感器套件（VLP-16 ×2 / 相机 ×2 / GNSS / IMU / ntrip） |
 | `nuway_packages/nuway_vehicle_launch/` | 车辆描述 |
-| `patches/` | cuda_blackboard 一行补丁 + 应用脚本 |
+| `patches/` | cuda_blackboard 一行补丁；canbridge 缺失的依赖声明 + 应用脚本 |
 | `nuway/` | 环境变量、DDS sysctl、编译脚本 |
 | `docs/build-on-orin.md` | 完整 SOP：10 个步骤 + 13 个踩坑 + 排错索引 |
 
@@ -75,6 +75,16 @@ nuway 提供的是上游 1.9.0 尚未提供的两件事：
 已删除与上游逐字节相同、或未被 launch 加载的文件：
 `robosense_Bpearl/Helios.launch.xml`、`ring_outlier_filter_node.param.yaml`、
 `distortion_corrector_node.param.yaml`。升级 Autoware 时 diff 面越小越好。
+
+## RTK / NTRIP 现状
+
+`ntrip` 包带 `COLCON_IGNORE`，暂不编译。原因：缺 `mavros_msgs`（工作区与 apt 都没有），
+且配置指向的 caster `UWA_Campus`（`3.143.243.81:2101`）已不可达。
+
+**RTK 不在关键路径上**：Autoware 用 NDT 对点云地图定位，GNSS 只提供初始位姿，
+`pose_initializer` 的 `pose_error_threshold` 是 5 m。米级 GNSS 通常足以让 NDT 收敛。
+
+⚠ `ntrip/config/ntrip-param.yaml` 里 **NTRIP 用户名密码是明文提交的**，建议轮换并改从环境变量读。
 
 ## 已知待办
 

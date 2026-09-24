@@ -12,3 +12,12 @@ if grep -q 'cudaStreamGetDevice' "$CB/src/cuda_mem_pool_context.cpp"; then
 else
   echo "· cuda_blackboard already patched"
 fi
+
+CANB="$ROOT/src/nuway/nuway_canbridge"
+[ -d "$CANB" ] || { echo "missing $CANB - run vcs import first"; exit 1; }
+if ! grep -q 'autoware_utils_diagnostics' "$CANB/nuway_can/package.xml"; then
+  patch -p0 -d "$CANB" < "$ROOT/patches/0002-canbridge-declare-missing-deps.patch"
+  echo "✔ canbridge dependency declarations added"
+else
+  echo "· canbridge dependency declarations already present"
+fi

@@ -1,0 +1,47 @@
+Subject: [PATCH] nuway_can / nuway_rviz_plugin: declare the deps they actually use
+
+Both CMakeLists call find_package on packages their package.xml never
+declares, so colcon has no dependency edge and schedules them before those
+packages are built. On a clean workspace the build fails at configure time:
+
+  nuway_can:         By not providing "Findautoware_utils_diagnostics.cmake" ...
+  nuway_rviz_plugin: By not providing "Findautoware_adapi_v1_msgs.cmake" ...
+
+Both dependencies are present in the workspace and build fine - only the
+ordering is wrong. The failure does not show up in the Docker image, where
+these packages are already installed before the build starts.
+
+Upstream: uwa-rev/canbridge_cpp @ autoware. Carry this until it is fixed there.
+---
+diff --git nuway_can/package.xml nuway_can/package.xml
+index 2bd650a..b2e03fd 100644
+--- nuway_can/package.xml
++++ nuway_can/package.xml
+@@ -23,6 +23,10 @@
+   <depend>nuway_interfaces</depend>
+   <depend>joy_linux</depend>
+   <depend>teleop_twist_joy</depend>
++  <depend>autoware_utils_diagnostics</depend>
++  <depend>autoware_vehicle_msgs</depend>
++  <depend>autoware_adapi_v1_msgs</depend>
++  <depend>tier4_vehicle_msgs</depend>
+ 
+   <test_depend>ament_lint_auto</test_depend>
+   <test_depend>ament_lint_common</test_depend>
+diff --git nuway_rviz_plugin/package.xml nuway_rviz_plugin/package.xml
+index eb9abcc..246859a 100644
+--- nuway_rviz_plugin/package.xml
++++ nuway_rviz_plugin/package.xml
+@@ -14,6 +14,12 @@
+   <depend>geometry_msgs</depend>
+   <depend>ament_index_cpp</depend>
+   <depend>nlohmann_json</depend>
++  <depend>autoware_adapi_v1_msgs</depend>
++  <depend>pluginlib</depend>
++  <depend>rviz_common</depend>
++  <depend>lifecycle_msgs</depend>
++  <depend>std_msgs</depend>
++  <depend>qtbase5-dev</depend>
+ 
+   <test_depend>ament_lint_auto</test_depend>
+   <test_depend>ament_lint_common</test_depend>
