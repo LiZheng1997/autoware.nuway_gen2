@@ -1,6 +1,8 @@
 <launch>
   <arg name="launch_driver" default="true"/>
   <arg name="gnss_receiver" default="sbg" description="ublox(default) or septentrio or sbg"/>
+  <arg name="use_gnss_ins_orientation" default="$(env GNSS_INS_ORIENTATION true)"
+       description="true when the receiver supplies INS orientation (SBG on the vehicle); set false for bag replay or receivers without heading"/>
 
   <group>
     <push-ros-namespace namespace="gnss"/>
@@ -20,13 +22,13 @@
     </group>
 
     <!-- Septentrio GNSS Driver -->
-    <group if="$(eval &quot;'$(var launch_driver)' and '$(var gnss_receiver)'=='septentrio'&quot;)">
-      <include file="$(find-pkg-share septentrio_gnss_driver)/launch/mosaic_x5_rover.launch.xml"/>
+    <group if="$(eval &quot;'$(var gnss_receiver)'=='septentrio'&quot;)">
+      <include file="$(find-pkg-share septentrio_gnss_driver)/launch/mosaic_x5_rover.launch.xml" if="$(var launch_driver)"/>
     </group>
 
     <!-- SBG GNSS Driver -->
-    <group if="$(eval &quot;'$(var launch_driver)' and '$(var gnss_receiver)'=='sbg'&quot;)">
-      <node pkg="sbg_driver" name="sbg_device" exec="sbg_device">
+    <group if="$(eval &quot;'$(var gnss_receiver)'=='sbg'&quot;)">
+      <node pkg="sbg_driver" name="sbg_device" exec="sbg_device" if="$(var launch_driver)">
         <param from="$(find-pkg-share nuway_sensor_kit_launch)/config/sbg_params.yaml"/>
       </node>
     </group>
@@ -40,7 +42,7 @@
       <arg name="output_topic_gnss_pose_cov" value="pose_with_covariance"/>
       <arg name="output_topic_gnss_fixed" value="fixed"/>
 
-      <arg name="use_gnss_ins_orientation" value="true"/>
+      <arg name="use_gnss_ins_orientation" value="$(var use_gnss_ins_orientation)"/>
     </include>
   </group>
 </launch>
