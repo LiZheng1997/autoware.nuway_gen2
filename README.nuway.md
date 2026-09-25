@@ -42,7 +42,7 @@ source nuway/setup_env.sh
 | 路径 | 内容 |
 |---|---|
 | `repositories/nuway.repos` | nuway_canbridge（`canbridge_cpp@autoware`），URL 已从 `lee.github.com` 别名改为标准形式 |
-| `nuway_packages/nuway_sensor_kit_launch/` | 传感器套件（VLP-16 ×2 / 相机 ×2 / GNSS / IMU / ntrip） |
+| `nuway_packages/nuway_sensor_kit_launch/` | 传感器套件（VLP-16 ×2 / 相机 ×2 / GNSS / IMU） |
 | `nuway_packages/nuway_vehicle_launch/` | 车辆描述 |
 | `patches/` | cuda_blackboard 一行补丁；canbridge 缺失的依赖声明 + 应用脚本 |
 | `nuway/` | 环境变量、DDS sysctl、编译脚本 |
@@ -78,13 +78,19 @@ nuway 提供的是上游 1.9.0 尚未提供的两件事：
 
 ## RTK / NTRIP 现状
 
-`ntrip` 包带 `COLCON_IGNORE`，暂不编译。原因：缺 `mavros_msgs`（工作区与 apt 都没有），
-且配置指向的 caster `UWA_Campus`（`3.143.243.81:2101`）已不可达。
+`ntrip` 包**已从本分支移除**（见移除该包的那个提交，其提交信息记录了完整的实现分析）。
+移除理由：它不编译、不被任何 launch 引用、且 RTK 不在关键路径上 ——
+Autoware 用 NDT 对点云地图定位，GNSS 只提供初始位姿，`pose_initializer` 的
+`pose_error_threshold` 是 5 m，米级 GNSS 足以让 NDT 收敛（已实测：`status=0`、σ≈2.9 m 可一次初始化成功）。
 
-**RTK 不在关键路径上**：Autoware 用 NDT 对点云地图定位，GNSS 只提供初始位姿，
-`pose_initializer` 的 `pose_error_threshold` 是 5 m。米级 GNSS 通常足以让 NDT 收敛。
+需要 RTK 时用 `git show <该提交>^:nuway_packages/nuway_sensor_kit_launch/ntrip/...` 取回，
+或从 `uwa-rev/autoware_on_nUWAy` 重新引入。复活它需要三步：
+`sudo apt install ros-humble-mavros-msgs ros-humble-rtcm-msgs`（两者 apt 里都有，只是未安装）、
+把 `rtcm_msgs` 补进 `package.xml`（CMakeLists 里有、package.xml 里漏了）、
+以及换一个可达的 caster。
 
-⚠ `ntrip/config/ntrip-param.yaml` 里 **NTRIP 用户名密码是明文提交的**，建议轮换并改从环境变量读。
+⚠ **原 `ntrip-param.yaml` 里的用户名密码是明文提交的，已进入 git 历史，删文件不能消除。
+那组凭据必须轮换。** 恢复时改从环境变量读，不要再写进仓库。
 
 ## 已知待办
 
