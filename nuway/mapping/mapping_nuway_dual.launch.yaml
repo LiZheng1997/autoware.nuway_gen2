@@ -1,16 +1,20 @@
 ---
-# 双雷达 + 重力对齐 的建图 launch。基于 spark_fast_lio 的 mapping_nuway_campus.launch.yaml，
-# 只改三处：
-#   1. lidar_topic/lidar_frame/config_path 默认值指向 merge_velodyne_clouds.py 的合并云
-#      (已在 base_link, 保留逐点 time 且归一到合并帧起点)
-#   2. 去掉 rviz 节点(无头运行)
+# Dual-lidar + gravity-alignment mapping launch. Based on spark_fast_lio's
+# mapping_nuway_campus.launch.yaml, with three changes:
+#   1. lidar_topic/lidar_frame/config_path defaults point to the merged cloud produced by
+#      merge_velodyne_clouds.py (already in base_link, keeps per-point time normalized to the
+#      start of the merged frame)
+#   2. Removed the rviz node (headless run)
 #
-# gravity_alignment 保持 false —— 试过开启, 但它永不完成(实测卡在
-# "Gravity alignment is enabled but not yet completed", 收集器 0 帧)。原因在
-# isMotionStopped(): `‖acc_ref − acc_curr‖ <= acc_diff_thr(0.2)` 即判定静止,
-# 而 nUWAy 以 1.25 m/s 匀速缓行, 加速度变化超不过该阈值, 计数器永远归零。
-# 该功能是给会被搬动/急动的机器人设计的。地图的重力对齐改为事后用地面平面做一次 SE(3) 校平,
-# 是否合法由 check_map.py 的"恒定倾角 vs 累积漂移"判读决定。
+# gravity_alignment stays false -- we tried enabling it, but it never completes (observed stuck
+# on "Gravity alignment is enabled but not yet completed", with the collector seeing 0 frames).
+# The reason is in isMotionStopped(): `‖acc_ref − acc_curr‖ <= acc_diff_thr(0.2)` is how it
+# decides the vehicle is stationary, but nUWAy creeps along at a constant 1.25 m/s, so the
+# acceleration variation never exceeds that threshold and the counter keeps resetting to zero.
+# That feature is meant for robots that get picked up or jerked around. Gravity alignment for
+# the map is instead done after the fact with a single SE(3) leveling pass on the ground plane;
+# whether that's valid is decided by check_map.py's "constant tilt vs. cumulative drift"
+# diagnosis.
 launch:
   - arg: {name: use_sim_time, default: 'true'}
   - arg: {name: map_frame, default: 'fast_lio_odom'}

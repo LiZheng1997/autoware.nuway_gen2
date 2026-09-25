@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""同时记录 FAST-LIO 里程计与 GNSS，用于拟合地图坐标系 → ENU 的变换"""
+"""Records FAST-LIO odometry and GNSS simultaneously, for fitting the map-frame -> ENU transform"""
 import rclpy, csv, sys
 OUTDIR = sys.argv[1] if len(sys.argv) > 1 else '/home/lz/campus_map'
 from rclpy.node import Node
@@ -25,4 +25,4 @@ finally:
         w=csv.writer(f); w.writerow(["t","x","y","z"]); w.writerows(odo)
     with open(f"{OUTDIR}/gps.csv","w") as f:
         w=csv.writer(f); w.writerow(["t","lat","lon","alt","status","cov"]); w.writerows(gps)
-    print(f"\n已写入 odo={len(odo)} gps={len(gps)}", flush=True)
+    print(f"\nWrote odo={len(odo)} gps={len(gps)}", flush=True)

@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
-"""点云地图质量体检: 地面平面的整体倾角, 以及沿行驶方向分段的倾角走势。
+"""Point-cloud map quality check: overall tilt of the ground plane, and how tilt trends across
+segments along the direction of travel.
 
-判读:
-  - 各段倾角都小且**接近常数**  -> 可用 / 或一次 SE(3) 旋转即可校平(恒定初始姿态误差)
-  - 倾角沿行程**单调增长**      -> 累积漂移, 旋转救不回, 必须换建图方案
-用法: check_map.py <pcd> [段数] [odo.csv]
+Diagnosis:
+  - Tilt is small in every segment and **roughly constant**  -> usable, or a single SE(3)
+    rotation can level it out (constant initial-attitude error)
+  - Tilt **monotonically grows** along the route                -> cumulative drift, a rotation
+    can't fix it, a different mapping approach is required
+Usage: check_map.py <pcd> [n_segments] [odo.csv]
 
-⚠ 给了 odo.csv 就按**轨迹弧长**分段, 否则退化成按最长坐标轴分段。
-L 形/带转弯的路线**必须**给 odo.csv —— 按 x 分段会把路线上高程不同的两段揉进同一个 bin,
-拟合出来的"倾角/地面高度"是假的(2026-09-24 实测: 全程 L 形路线按 x 分段拟出 z0=−30.58 m)。
-odo.csv 必须与该 pcd 同坐标系, 即用**配准前**的原始建图输出。
+Note: if odo.csv is given, segments are cut by **trajectory arc length**; otherwise it falls
+back to binning by the longest coordinate axis.
+An L-shaped or turning route **must** be given odo.csv -- binning by x lumps two segments of the
+route that sit at different elevations into the same bin, and the fitted "tilt/ground height"
+comes out fake (measured 2026-09-24: for a full L-shaped route binned by x, the fit gave
+z0=-30.58 m).
+odo.csv must be in the same coordinate frame as this pcd, i.e. the raw mapping output
+**before registration**.
 """
 import sys, numpy as np
 
@@ -26,12 +33,13 @@ with open(path, 'rb') as f:
             break
 a = np.loadtxt(path, skiprows=skip, usecols=(0, 1, 2))
 x, y, z = a.T
-print(f'{path}\n  点数 {len(a)}  '
+print(f'{path}\n  points {len(a)}  '
       f'x∈[{x.min():.1f},{x.max():.1f}]  y∈[{y.min():.1f},{y.max():.1f}]  z∈[{z.min():.1f},{z.max():.1f}]')
 
 
 def ground_plane(P):
-    """每个 2 m xy 网格取最低点作地面候选, 去掉最高的 10%, 最小二乘拟合平面。"""
+    """Takes the lowest point in each 2 m xy grid cell as a ground candidate, drops the top 10%,
+    and least-squares fits a plane."""
     if len(P) < 500:
         return None
     g = np.floor(P[:, :2] / 2.0).astype(np.int64)
@@ -53,16 +61,16 @@ def ground_plane(P):
 
 
 r = ground_plane(a)
-print(f'\n整图地面: 倾角={r[1]:.2f}°  法向=({r[0][0]:+.4f},{r[0][1]:+.4f},{r[0][2]:.4f})  '
-      f'截距 z0={r[3]:.2f} m  残差 std={r[4]:.2f} m  地面点={r[2]}')
-print(f'z 的 1%/50%/99% 分位: {np.percentile(z,1):.2f} / {np.percentile(z,50):.2f} / {np.percentile(z,99):.2f}')
+print(f'\nWhole-map ground: tilt={r[1]:.2f}°  normal=({r[0][0]:+.4f},{r[0][1]:+.4f},{r[0][2]:.4f})  '
+      f'intercept z0={r[3]:.2f} m  residual std={r[4]:.2f} m  ground points={r[2]}')
+print(f'z percentiles 1%/50%/99%: {np.percentile(z,1):.2f} / {np.percentile(z,50):.2f} / {np.percentile(z,99):.2f}')
 
 if odo_csv:
     from scipy.spatial import cKDTree
     o = np.genfromtxt(odo_csv, delimiter=',', names=True)
     T = np.c_[o['x'], o['y']]
     keep = np.r_[True, np.linalg.norm(np.diff(T, axis=0), axis=1).cumsum() // 2.0 > 0]
-    # 每 ~2 m 取一个轨迹点, 并算其弧长
+    # Take one trajectory point every ~2 m, and compute its arc length
     d = np.r_[0.0, np.linalg.norm(np.diff(T, axis=0), axis=1).cumsum()]
     idx = np.unique(np.searchsorted(d, np.arange(0, d[-1], 2.0)))
     Ts, arc = T[idx], d[idx]
@@ -70,20 +78,20 @@ if odo_csv:
     tree = cKDTree(Ts)
     for i in range(0, len(a), 200000):
         coord[i:i+200000] = arc[tree.query(a[i:i+200000, :2], k=1)[1]]
-    label = f'轨迹弧长(总 {d[-1]:.0f} m, {len(Ts)} 个采样点)'
+    label = f'trajectory arc length (total {d[-1]:.0f} m, {len(Ts)} samples)'
 else:
     axis = 0 if (x.max() - x.min()) >= (y.max() - y.min()) else 1
     coord = a[:, axis]
-    label = f'{"x" if axis==0 else "y"} 轴  ⚠ 未给 odo.csv, 弯道路线此读数不可信'
-print(f'\n沿 {label} 分 {nseg} 段:')
-print(f'{"段":>3} {"范围":>18} {"点数":>8} {"倾角°":>7} {"法向(nx,ny)":>20} {"地面z0":>8} {"残差":>6}')
+    label = f'{"x" if axis==0 else "y"} axis  ⚠ no odo.csv given, this reading is unreliable for a turning route'
+print(f'\nSplitting into {nseg} segments along {label}:')
+print(f'{"seg":>3} {"range":>17} {"points":>8} {"tilt°":>7} {"normal(nx,ny)":>17} {"z0":>8} {"resid":>6}')
 edges = np.percentile(coord, np.linspace(0, 100, nseg + 1))
 tilts, prev = [], None
 for i in range(nseg):
     m = (coord >= edges[i]) & ((coord < edges[i+1]) if i < nseg-1 else (coord <= edges[i+1]))
     s = ground_plane(a[m])
     if s is None:
-        print(f'{i:>3}  点太少'); continue
+        print(f'{i:>3}  too few points'); continue
     n, tilt, ng, z0, rs = s
     d = '' if prev is None else f'  Δ={np.degrees(np.arccos(np.clip(prev@n,-1,1))):.2f}°'
     print(f'{i:>3} [{edges[i]:7.1f},{edges[i+1]:7.1f}] {m.sum():>8} {tilt:>7.2f} '
@@ -92,10 +100,10 @@ for i in range(nseg):
 
 if len(tilts) >= 3:
     k = np.polyfit(np.arange(len(tilts)), tilts, 1)[0]
-    print(f'\n倾角随段号的线性斜率: {k:+.2f}°/段  (整段变化 {k*(len(tilts)-1):+.2f}°)')
+    print(f'\nLinear slope of tilt vs. segment index: {k:+.2f}°/seg  (total change over the route {k*(len(tilts)-1):+.2f}°)')
     if abs(k * (len(tilts) - 1)) > 1.0:
-        print('  判读: 倾角沿行程显著变化 -> **累积漂移**, 一次旋转救不回')
+        print('  Diagnosis: tilt changes significantly along the route -> **cumulative drift**, a rotation cannot fix this')
     elif max(tilts) > 1.0:
-        print('  判读: 倾角基本恒定但偏大 -> 初始姿态误差, 一次 SE(3) 旋转可校平')
+        print('  Diagnosis: tilt is roughly constant but large -> initial-attitude error, a single SE(3) rotation can level it')
     else:
-        print('  判读: 地面平整且各段一致 -> 可用')
+        print('  Diagnosis: ground is flat and consistent across segments -> usable')

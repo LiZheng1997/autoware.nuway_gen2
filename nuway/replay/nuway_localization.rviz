@@ -28,9 +28,9 @@ Visualization Manager:
       Marker Scale: 2
       Frame Timeout: 15
 
-    # 点云地图（latched，必须用 transient_local 才收得到）
+    # Pointcloud map. It is latched, so transient_local durability is required.
     - Class: rviz_default_plugins/PointCloud2
-      Name: 点云地图
+      Name: Pointcloud map
       Enabled: true
       Topic:
         Value: /map/pointcloud_map
@@ -48,9 +48,9 @@ Visualization Manager:
       Alpha: 0.35
       Decay Time: 0
 
-    # 实时扫描（适配器合并后的双雷达点云，base_link 系）
+    # Live scan: both lidars merged by the replay adapter, in base_link.
     - Class: rviz_default_plugins/PointCloud2
-      Name: 实时扫描
+      Name: Live scan
       Enabled: true
       Topic:
         Value: /sensing/lidar/concatenated/pointcloud
@@ -65,9 +65,9 @@ Visualization Manager:
       Alpha: 1
       Decay Time: 0
 
-    # NDT 实际用来配准的降采样点云
+    # The downsampled cloud NDT actually registers against the map.
     - Class: rviz_default_plugins/PointCloud2
-      Name: NDT 输入(降采样)
+      Name: NDT input (downsampled)
       Enabled: false
       Topic:
         Value: /localization/util/downsample/pointcloud
@@ -81,9 +81,9 @@ Visualization Manager:
       Color: 0; 255; 255
       Alpha: 1
 
-    # NDT 对齐后的点云：与地图重合说明匹配good
+    # Scan after NDT alignment. How well it overlays the map is the match quality.
     - Class: rviz_default_plugins/PointCloud2
-      Name: NDT 对齐结果
+      Name: NDT aligned scan
       Enabled: true
       Topic:
         Value: /localization/pose_estimator/points_aligned
@@ -98,7 +98,7 @@ Visualization Manager:
       Alpha: 1
 
     - Class: rviz_default_plugins/PoseWithCovariance
-      Name: NDT 位姿
+      Name: NDT pose
       Enabled: true
       Topic:
         Value: /localization/pose_estimator/pose_with_covariance
@@ -123,7 +123,7 @@ Visualization Manager:
           Value: false
 
     - Class: rviz_default_plugins/PoseWithCovariance
-      Name: GNSS 位姿(无RTK)
+      Name: GNSS pose (no RTK)
       Enabled: true
       Topic:
         Value: /sensing/gnss/pose_with_covariance
@@ -148,7 +148,7 @@ Visualization Manager:
           Value: false
 
     - Class: rviz_default_plugins/Odometry
-      Name: 定位输出轨迹
+      Name: Localization output
       Enabled: true
       Topic:
         Value: /localization/kinematic_state

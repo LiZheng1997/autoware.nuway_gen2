@@ -1,151 +1,186 @@
-# nUWAy 点云建图与 NDT 定位
+# Pointcloud mapping and NDT localization for nUWAy
 
-用 campus 数据包在 Orin 上从零建出 Autoware 可用的点云地图，并通过 NDT 定位验收。
+How to turn a rosbag into a pointcloud map that Autoware's NDT accepts, on the Orin,
+and how to prove it works.
 
-**实测结论（2026-09-24/25）**：320 m 的短图**已通过验收** —— NVTL 中位 3.11、全程 99.9% 在
-阈值 2.3 之上、NDT 位姿 9.9 Hz 满速、GNSS 不带 RTK 一次初始化成功。
-**728 m 与 1100 m 的长图不可用**，原因是 LIO 的非刚性形变，不是参数能调好的（见第 7 节）。
+**Measured outcome (2026-09-24/25).** A 320 m map **passes acceptance**: median NVTL 3.11,
+99.9 % of frames above the 2.3 gate, NDT pose at the full 9.9 Hz, and GNSS without RTK
+initialises on the first attempt. Maps of 728 m and 1100 m **do not work**; the cause is
+non-rigid warp in the LIO trajectory, which no parameter fixes (section 7).
 
-> **路径说明**：本目录脚本里的绝对路径按本机实测环境写死
-> （`/home/lz/campus_data/...`、`/home/lz/fast_lio_ws`、`/home/lz/VTR-Demo`、`/home/lz/aw_verify`）。
-> 换机器时逐个改，或在脚本顶部加变量覆盖。
+> **About paths.** The scripts here hard-code absolute paths from the machine they were
+> developed on (`/home/lz/campus_data/...`, `/home/lz/fast_lio_ws`, `/home/lz/VTR-Demo`,
+> `/home/lz/aw_verify`). Adjust them per machine, or shadow them with variables at the top.
 
 ---
 
-## 1. 依赖
+## 1. Dependencies
 
-| 件 | 位置 | 说明 |
+| Component | Location | Role |
 |---|---|---|
-| spark-fast-lio | `~/fast_lio_ws` | LIO 里程计与配准点云 |
-| 双雷达合并节点 | `~/VTR-Demo/scripts/merge_velodyne_clouds.py` | **不要另写** —— 它已正确处理逐点时间 |
-| TF 树 | `~/ASRL/vtr3/src/config/nuway_vtr_tf.urdf.xml` | 建图期间的整车 TF |
-| Autoware 1.9.0 | `~/aw_verify` | 定位验收 |
+| spark-fast-lio | `~/fast_lio_ws` | LIO odometry and registered clouds |
+| Dual-lidar merger | `~/VTR-Demo/scripts/merge_velodyne_clouds.py` | **Do not rewrite it** — it already handles per-point time correctly |
+| TF tree | `~/ASRL/vtr3/src/config/nuway_vtr_tf.urdf.xml` | Vehicle TF during mapping |
+| Autoware 1.9.0 | `~/aw_verify` | Localization acceptance |
 
-## 2. 为什么必须用双雷达
+## 2. Why both lidars are mandatory
 
-包里每帧点云只有约 12,500 点、时间跨度 44~48 ms —— 是**约 160° 的扇区扫描**，不是整圈。
-单用前雷达 = 单个 160° 扇区，俯仰可观测性极弱：
+Each recorded frame holds about 12,500 points spanning 44–48 ms — that is roughly a
+**160 degree sector, not a full sweep**. One front lidar therefore gives a single 160 degree
+sector, and pitch is barely observable:
 
-| | 单前雷达 | 双雷达合并 |
+| | Front lidar only | Both lidars merged |
 |---|---|---|
-| 地面倾角沿行程 | 2.0° → 5.1°（累积漂移） | 0.20° → 1.77°（基本恒定） |
-| 地面拟合残差 | 1.77 m | 1.14 m |
-| NDT NVTL 中位 | **0.00**（完全不收敛） | **3.09** |
+| Ground tilt along the route | 2.0° → 5.1° (accumulating) | 0.20° → 1.77° (essentially constant) |
+| Ground-fit residual | 1.77 m | 1.14 m |
+| Median NDT NVTL | **0.00** (never converges) | **3.09** |
 
-前后两台合起来约 320° 覆盖，这是方案成立的关键。**上车采集时不要改雷达的角度窗口。**
+Front and rear together cover about 320 degrees, and that is what makes the approach work.
+**Do not change the lidars' angular windows when recording on the vehicle.**
 
-另外前后雷达的 header **相差 37 ms、并不同步**，靠 `merge_velodyne_clouds.py` 的
-`normalize_time`（把逐点时间归一到合并帧起点并排序）对齐，FAST-LIO 才能跨两台雷达正确去畸变。
+The two lidars are also **37 ms out of sync**. `merge_velodyne_clouds.py` handles this by
+normalising each point's timestamp to the start of the merged scan and sorting by time,
+which is what lets FAST-LIO de-skew correctly across both sensors.
 
-## 3. 建图
+## 3. Building a map
 
 ```bash
-bash nuway/mapping/build_map_dual.sh 250      # 时长(秒)
+bash nuway/mapping/build_map_dual.sh 250      # duration in seconds
 ```
 
-它依次起：TF 树 → 合并节点 → FAST-LIO（`mapping_nuway_dual.launch.yaml`）→
-收集器(`collect_map.py`) + 轨迹记录(`record_traj.py`) → 回放**两个**雷达话题。
-产物：`campus_dual.pcd`（0.2 m 体素）、`odo.csv`、`gps.csv`。
+It starts, in order: the TF tree, the merger, FAST-LIO (`mapping_nuway_dual.launch.yaml`),
+the accumulator (`collect_map.py`) and trajectory logger (`record_traj.py`), then replays
+**both** lidar topics. Output: `campus_dual.pcd` (0.2 m voxels), `odo.csv`, `gps.csv`.
 
-`build_map_full.sh` 是长路线版本，额外用 `nuway_campus_full.yaml` 把
-`cube_side_length` 从 300 放大到 1000 —— 300 对超过 150 m 的路线会**把地图半途截断**。
-放大后还有个副作用正好有用：车折返时去程的地图点仍在 ikd-tree 里，
-scan-to-map ICP 会把回程配上去，相当于一次隐式回环（z 闭合误差 5.49 m → 0.07 m）。
+`build_map_full.sh` is the long-route variant. It swaps in `nuway_campus_full.yaml`, which
+raises `cube_side_length` from 300 to 1000 — at 300 the ikd-tree evicts map points and the
+map is **truncated part-way** through any route longer than about 150 m. Raising it has a
+useful side effect: when the vehicle turns back, the outbound map points are still resident,
+so scan-to-map ICP registers the return leg against them. That acts as an implicit loop
+closure and cut the vertical loop residual from 5.49 m to 0.07 m.
 
-> ⚠ **不要开 `gravity_alignment.enable_gravity_alignment`**。它的 `isMotionStopped()`
-> 判据是 `‖acc_ref − acc_curr‖ ≤ 0.2` 即算静止，而 nUWAy 以 1.25 m/s 匀速缓行超不过该阈值，
-> 计数器永远归零、节点一帧不发。实测卡死、收集器 0 帧。重力对齐改为事后校平（第 4 节）。
+> ⚠ **Do not enable `gravity_alignment.enable_gravity_alignment`.** Its `isMotionStopped()`
+> test treats the platform as stationary whenever `‖acc_ref − acc_curr‖ ≤ 0.2`, and nUWAy
+> cruising at 1.25 m/s never exceeds that, so the counter resets forever and the node
+> publishes nothing at all. Observed directly: alignment never completed and the accumulator
+> received zero frames. Gravity alignment is done afterwards instead, by levelling the
+> finished map (section 4).
 
-## 4. 体检与地理配准
+## 4. Inspection and georeferencing
 
 ```bash
-python3 nuway/mapping/check_map.py <pcd> 6 <odo.csv>     # 弯道路线必须传 odo.csv
-python3 nuway/mapping/georef_map.py <odo.csv> <gps.csv> <pcd> <输出目录> 2.4
+python3 nuway/mapping/check_map.py <pcd> 6 <odo.csv>     # odo.csv is required for curved routes
+python3 nuway/mapping/georef_map.py <odo.csv> <gps.csv> <pcd> <out_dir> 2.4
 ```
 
-`check_map.py` 沿**轨迹弧长**分段拟合地面，判读"恒定倾角（可一次旋转校平）"还是"累积漂移"。
-按坐标轴分段会把 L 形路线上高程不同的两段揉进同一 bin，拟出 `z0 = −30.58 m` 这种假值。
+`check_map.py` fits the ground plane in segments along **trajectory arc length** and reports
+whether the tilt is constant (a single rotation can level it) or accumulating. Binning by a
+coordinate axis instead puts parts of an L-shaped route at different elevations into the same
+bin and produces nonsense such as a fitted ground height of −30.58 m.
 
-`georef_map.py` 做四件事：① 用地图地面法向做一次 SE(3) 校平（**仅当倾角恒定时合法**）；
-② 里程计与 GNSS 做 RANSAC + Kabsch 的 SE(2) 拟合；③ 地面平移到 z=0；
-④ 写 `map_projector_info.yaml`（`LocalCartesianUTM`，高程取 GNSS 中位数减天线高 2.4 m）。
-输出目录即 Autoware 的 `map_path`，含 `pointcloud_map.pcd` / `map_projector_info.yaml` /
-占位 `lanelet2_map.osm`（NDT 不需要矢量地图，但 map_loader 会加载它；规划需要手绘车道网络）。
+`georef_map.py` does four things: (1) one SE(3) levelling rotation taking the map's ground
+normal to +z — **valid only when the tilt is constant**; (2) a RANSAC + Kabsch SE(2) fit of
+the LIO trajectory to GNSS; (3) a translation putting the ground at z = 0; (4) it writes
+`map_projector_info.yaml` (`LocalCartesianUTM`, altitude = median GNSS altitude minus the
+2.4 m antenna height). The output directory is what you pass to Autoware as `map_path`; it
+holds `pointcloud_map.pcd`, `map_projector_info.yaml` and a placeholder `lanelet2_map.osm`
+(NDT needs no vector map, but map_loader loads one; planning needs a hand-drawn lane network).
 
-`check_drift.py` 用往返重访量累积漂移：用 GNSS 把回程点配到去程的同一物理位置，
-再比里程计之差 —— **不需要真值也不需要回环软件**。注意它输出的"水平漂移"列混入了
-往返的横向位置差与 GNSS 配对误差（配对距可达 8 m），水平漂移以首尾闭合为准，z 列才干净。
+`check_drift.py` measures accumulated drift from out-and-back revisits: it uses GNSS to pair
+each point on the return leg with the same physical location on the outbound leg, then
+compares the odometry between them — **no ground truth and no loop-closure software needed**.
+Note that its horizontal column also contains the lateral offset between the two passes and
+the GNSS pairing error (pairing distance reaches 8 m), so judge horizontal drift from the
+start-to-end loop residual; only the z column is clean.
 
-## 5. 回放验收
+## 5. Replay and acceptance
 
 ```bash
-bash nuway/replay/ndt_verify.sh <地图目录> <输出目录> <回放起始偏移s> <采集时长s>
+bash nuway/replay/ndt_verify.sh <map_dir> <out_dir> <playback_start_offset_s> <collect_s>
 ```
 
-`bag_to_autoware.py` 是**回放专用适配器**，实车不需要。它补三件事：
+`bag_to_autoware.py` is a **replay-only adapter**; the vehicle does not need it. It supplies
+three things:
 
-1. **时间基准**。包里所有话题的 header 比 bag 录制时刻超前约 **18.2 s**（采集机与传感器整机时钟
-   不同步，各传感器之间是一致的），而 `--clock` 按录制时刻发，NDT 的 1 s 容差必然失败。
-   适配器自标定该偏移并把转发消息搬到 `/clock` 基准上。
-   标定采用**稳定性门控**（预热 6 s + 最近 40 样本极差 <0.1 s 才锁定）——
-   带 `--start-offset` 的回放开头会突发投递积压消息，取头 N 个样本会读到偏 30 s 的暂态值。
-2. **点云类型**。包是旧 velodyne 驱动录的 `PointXYZIRT`(22 B)，1.9.0 的预处理链要
-   `PointXYZIRC`(16 B)。实车上 nebula 驱动原生产出 `PointXYZIRCAEDT`，不存在这个问题。
-3. **车速**。包里车速在 `/can_twist_fb`，Autoware 要 `/vehicle/status/velocity_status`
-   (`VelocityReport`)；缺了它 gyro_odometer 没有 twist，EKF 只能空转。
+1. **A common time base.** Every topic's header stamps run about **18.2 s ahead** of the bag's
+   record times — the recording machine's clock and the sensors' clock were not synchronised,
+   though the sensors agree with each other. Since `--clock` publishes record time, NDT's 1 s
+   tolerance is violated on every frame. The adapter calibrates that offset and shifts each
+   forwarded message onto the `/clock` base. Calibration is **gated on stability** (6 s warm-up,
+   then the last 40 samples must span less than 0.1 s): a replay started with `--start-offset`
+   delivers a burst of backlogged messages first, and sampling the first N messages reads a
+   transient that is off by nearly 30 s.
+2. **The point type.** The bag was recorded by the old velodyne driver as `PointXYZIRT` (22 B);
+   the 1.9.0 preprocessing chain expects `PointXYZIRC` (16 B). On the vehicle the nebula driver
+   emits `PointXYZIRCAEDT` natively, so this does not arise.
+3. **Vehicle speed.** The bag carries speed on `/can_twist_fb`, while Autoware expects
+   `/vehicle/status/velocity_status` (`VelocityReport`). Without it gyro_odometer has no twist
+   and the EKF free-runs.
 
-另外 frame 名要对齐（包里 `lidar_velodyne_front/rear` → sensor kit 的 `velodyne_front/rear_link`），
-外参一律以 `nuway_sensor_kit_description` 的实车标定为准。
+Frame names also have to be reconciled — the bag uses `lidar_velodyne_front/rear`, the sensor
+kit uses `velodyne_front/rear_link` — while the extrinsics always come from the vehicle
+calibration in `nuway_sensor_kit_description`.
 
-> ⚠ **指标采集不要用 `ros2 topic echo`**。`ros2 daemon` 一旦被 `kill -KILL -<PGID>` 连带杀死，
-> 后续所有 echo 会启动即崩（`xmlrpc Fault: !rclpy.ok()`），采集文件全是 traceback，
-> 于是一路报出假的 "NVTL=0"。用 `collect_ndt.py`（rclpy 直接订阅）。
+> ⚠ **Do not collect metrics with `ros2 topic echo`.** Once `ros2 daemon` is killed as
+> collateral of `kill -KILL -<PGID>`, every subsequent echo dies on startup with
+> `xmlrpc Fault: !rclpy.ok()`, the capture files contain nothing but tracebacks, and the run
+> reports a bogus "NVTL = 0". Use `collect_ndt.py`, which subscribes through rclpy directly.
 
-## 6. 可视化
+## 6. Visualisation
 
 ```bash
-bash nuway/replay/viz_localization.sh <地图目录> 0.5 0     # Orin 上起定位栈, 0=不开本机 rviz
-# 另一台同网段机器（DDS 跨机发现可用）：
+bash nuway/replay/viz_localization.sh <map_dir> 0.5 0     # localization stack on the Orin; 0 = no local rviz
+# From another machine on the same network (cross-host DDS discovery works):
 rviz2 -d nuway/replay/nuway_localization.rviz --ros-args -p use_sim_time:=true
 ```
 
-**`use_sim_time:=true` 不能省** —— 回放用的是包内时间戳，RViz 默认走墙上时间，
-两者差一年，TF 查询全部失败、画面空白。
-该配置不依赖 Autoware 的自定义 rviz 插件，原生 `rviz2` 即可打开。
+**`use_sim_time:=true` is not optional.** Playback carries the timestamps recorded in the bag;
+RViz defaults to wall time, the two are a year apart, and every TF lookup fails leaving a blank
+view. The config uses no Autoware-specific rviz plugins, so a stock `rviz2` opens it.
 
-## 7. 长图为什么不可用
+## 7. Why long maps fail
 
-同一张 728 m 图、同一段数据、**只改全局刚性变换**，在起点区测：
+The same 728 m map, the same sensor data, **only the global rigid transform changed**, measured
+at the start of the route:
 
-| | 全局拟合校平+SE(2) | 只用起点区拟合 | （参照）250 s 短图 |
+| | Global levelling + SE(2) | Fitted to the start region only | (reference) 250 s map |
 |---|---|---|---|
-| NVTL 中位 | 2.08 | **3.00** | 3.09 |
-| 迭代中位 | 25 | 3 | 2 |
-| NDT 位姿帧数 | 148 | 628 | 1170 |
+| Median NVTL | 2.08 | **3.00** | 3.09 |
+| Median iterations | 25 | 3 | 2 |
+| NDT pose frames | 148 | 628 | 1170 |
 
-地图点一个没动，NVTL 就回来了 ⇒ **没有任何单一刚性变换能同时服务整张长图**，
-每个区域想要的变换都不同（全局与局部拟合的 yaw 差 3.4°）。这是非刚性形变。
+Not one map point moved and NVTL recovered, so **no single rigid transform can serve the whole
+map**: every region wants a different one (global and local fits differ by 3.4° in yaw). That
+is what non-rigid warp means.
 
-**已用实测排除的其他嫌疑**（不要重复排查）：
+**Alternative explanations ruled out by measurement** — do not re-investigate these:
 
-- `cube_side_length`：250 s + cube 1000 → NVTL 3.09，与 cube 300 逐项一致 —— 无辜
-- 收集器的空间哈希碰撞：三张图都是 0.015%，与地图大小无关 —— 无辜
-- "往返两遍造成重影"：单程长图（728 m）同样失败（1.88），**该假说被证伪**，至多是次要因素
-- 地图太大撑不住：`dynamic_map_loading.map_radius = 150 m`，NDT 只用车周 150 m 建体素
+- `cube_side_length`: a 250 s map built with cube 1000 gives NVTL 3.09, matching cube 300 on
+  every metric. Not the cause.
+- Voxel hash collisions in the accumulator: 0.015 % on all three maps, independent of map size.
+  Not the cause.
+- Ghosting from driving the corridor twice: the single-pass 728 m map fails just as badly
+  (1.88). **This hypothesis was falsified**; at most it is a secondary effect.
+- The map simply being too large: `dynamic_map_loading.map_radius` is 150 m, so NDT only
+  voxelises the map within 150 m of the vehicle.
 
-**由此否定的方案**：
-- ❌ Autoware 的 divided/tiled 地图 —— 所有瓦片共用一个 map 坐标系，仍是一次刚性变换
-- ❌ 复用 VTR3 的 teach 位姿图 —— 实测 3933 顶点 / 3932 边全部是 `TEMPORAL` 且严格连续
-  （`SPATIAL` 一次未出现），teach 阶段没有回环也没有位姿图优化，精度来源与自建图相同
+**Remedies this rules out:**
 
-**可行方向**：① GNSS 约束的 LIO（形变正是 GNSS 能钉住的，LIO-SAM 一类有现成 GPS 因子）；
-② 带回环 + 位姿图优化的 SLAM（GLIM / SC-LIO-SAM）；③ 运营路段缩到约 300 m（已验证可用）。
+- ❌ Autoware's divided/tiled pointcloud map — all tiles share one map frame, so it is still a
+  single rigid transform.
+- ❌ Reusing the VTR3 teach pose graph — its 3933 vertices and 3932 edges are **all `TEMPORAL`
+  and strictly sequential** (`SPATIAL` never appears), so teach performs neither loop closure
+  nor pose-graph optimisation and offers no better accuracy than mapping the bag directly.
 
-## 8. 上车采集要求
+**Directions that remain:** (1) GNSS-constrained LIO — warp is exactly what GNSS pins down, and
+LIO-SAM and similar already carry a GPS factor; (2) SLAM with loop closure and pose-graph
+optimisation (GLIM, SC-LIO-SAM); (3) keep the operating route near 300 m, which is verified.
 
-**必录**
+## 8. What to record on the vehicle
 
-| 话题 | 类型 | 频率 |
+**Required**
+
+| Topic | Type | Rate |
 |---|---|---|
 | `/lidar/velodyne/front/cloud` | PointCloud2 | 10 Hz |
 | `/lidar/velodyne/rear/cloud` | PointCloud2 | 10 Hz |
@@ -153,25 +188,32 @@ rviz2 -d nuway/replay/nuway_localization.rviz --ros-args -p use_sim_time:=true
 | `/gps/fix` | NavSatFix | 5 Hz |
 | `/can_twist_fb` | TwistStamped | 46 Hz |
 
-建议加录 `/CameraFront` `/CameraRear`（感知用）、`/tf_static`。
-只录必录集约 5 GB / 15 分钟；加两路相机约 38 GB。
+Also worth recording: `/CameraFront`, `/CameraRear` (perception) and `/tf_static` if published.
+The required set alone is about 5 GB per 15 minutes; adding both cameras takes it to about 38 GB.
 
-**采集方式（比话题更重要）**
+**How to drive the recording — this matters more than the topic list**
 
-1. 开头**静止 ≥15 s**（FAST-LIO 要静止段估重力与零偏）
-2. 闭环要真闭上：回到起点并与起点段**同向重叠 20–30 m**，最后静止 10 s
-3. **采集机时钟对准 NTP/PTP** —— 上次整机偏 18.2 s
-4. 尽量全程前进（上次去程是倒车）
-5. 能开 RTK 就开（现在 `status=0`、σ≈2.9 m、约 30% 离群）
-6. **雷达角度窗口保持现状**（每台约 160°，合计约 320°）
-7. 车速约 1.3 m/s，转弯处慢一点
+1. Stay **stationary for at least 15 s** at the start; FAST-LIO needs it to estimate gravity
+   and the IMU biases.
+2. Close the loop for real: return to the start and **overlap the first 20–30 m in the same
+   direction of travel**, then stand still for 10 s. Merely ending up nearby is not enough —
+   loop closure needs shared observations.
+3. **Synchronise the recording machine's clock** (NTP or PTP). The existing bag is off by 18.2 s.
+4. Drive forward throughout if possible; the existing bag reverses on the outbound leg.
+5. Use RTK if it can be arranged. Today's fixes are `status=0`, σ ≈ 2.9 m, with roughly 30 %
+   outliers.
+6. **Leave the lidar angular windows as they are** (about 160° each, about 320° combined).
+7. Around 1.3 m/s, slower through turns.
 
-## 9. 验收判据
+## 9. Acceptance criteria
 
-`converged_param_type: 1` + `converged_param_nearest_voxel_transformation_likelihood: 2.3`
-是 Autoware 自己的收敛闸。因此：
+Autoware's own convergence gate is `converged_param_type: 1` together with
+`converged_param_nearest_voxel_transformation_likelihood: 2.3`. Therefore:
 
-- **NVTL 有样本但位姿 0 帧** = 每一帧都被判不收敛，是地图问题的明确信号
-- 通过线：NVTL 中位 > 2.3 且低于阈值的比例接近 0、NDT 位姿接近 10 Hz 满速、迭代次数个位数
-- ⚠ **"NDT 与 GNSS 的水平距离"不能当定位精度用** —— GNSS 本身约 30% 离群
-  （配准 RANSAC 内点仅 864/1232）。要给精度需要更好的真值。
+- **NVTL samples present but zero pose frames** means Autoware rejected every single frame —
+  an unambiguous sign that the map, not the measurement tooling, is at fault.
+- Passing looks like: median NVTL above 2.3 with almost no frames below it, NDT pose at close to
+  the full 10 Hz, and single-digit iteration counts.
+- ⚠ **Do not read "distance between NDT and GNSS" as localization accuracy.** GNSS itself is
+  roughly 30 % outliers (the georeferencing RANSAC keeps only 864 of 1232 points). Quoting an
+  accuracy figure needs better ground truth.
