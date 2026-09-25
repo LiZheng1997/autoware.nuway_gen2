@@ -3,15 +3,25 @@ ntrip_client:
     # NTRIP caster. Defaults target AUSCORS, the free national service run by
     # Geoscience Australia. Register once at https://gnss.ga.gov.au/registration
     #
-    # Mountpoints nearest UWA Crawley, measured from the AUSCORS source table:
-    #   SALT00AUS0   6.9 km   Salter Point (WA)    RTCM 3.3, no GGA feedback required
-    #   CUT000AUS0   7.3 km   Perth (Curtin)       RTCM 3.3, no GGA feedback required
-    #   PERT00AUS0  21.0 km   Gnangara (WA)
-    # A 7 km baseline is comfortably inside the 20-30 km where single-base RTK
-    # holds 2-3 cm, so SALT00AUS0 is the default.
+    # Mountpoints nearest UWA Crawley, taken from the AUSCORS source table and
+    # then measured by actually pulling 15 s from each:
+    #
+    #   CUT000AUS0  7.3 km  Perth (Curtin)     MSM7, 5 constellations, ephemerides
+    #   SALT00AUS0  6.9 km  Salter Point (WA)  MSM4, 4 constellations, no ephemerides
+    #   PERT00AUS0 21.0 km  Gnangara (WA)      not measured
+    #
+    # CUT000AUS0 is the default despite being 400 m further away. It carries
+    # MSM7 rather than MSM4, it includes Galileo where Salter Point advertises
+    # it but does not currently broadcast it, and it embeds GPS and GLONASS
+    # ephemerides (1019/1020) so a cold-started receiver does not have to wait
+    # on the satellites' own navigation message before it can fix. It costs
+    # about 12 kbit/s against Salter Point's 3.9 kbit/s, which is negligible on
+    # a cellular link. Both are single-base mounts needing no GGA feedback, and
+    # a 7 km baseline sits comfortably inside the 20-30 km where single-base RTK
+    # holds 2-3 cm.
     host: ntrip.data.gnss.ga.gov.au
     port: 2101
-    mountpoint: SALT00AUS0
+    mountpoint: CUT000AUS0
 
     # Credentials are NOT stored here. ntrip_launch.py reads NTRIP_USER and
     # NTRIP_PASS from the environment and overrides these placeholders. An

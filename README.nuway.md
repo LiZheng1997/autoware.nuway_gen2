@@ -84,15 +84,19 @@ service run by Geoscience Australia. Register once at
 
 Mountpoints nearest UWA Crawley, measured from the AUSCORS source table:
 
-| Distance | Mountpoint | Format | Site |
-|---|---|---|---|
-| 6.9 km | `SALT00AUS0` | RTCM 3.3 | Salter Point (WA) - the default |
-| 7.3 km | `CUT000AUS0` | RTCM 3.3 | Perth (Curtin) |
-| 21.0 km | `PERT00AUS0` | RTCM 3.3 | Gnangara (WA) |
+| Mountpoint | Distance | Observations | Constellations | Ephemerides | Rate |
+|---|---|---|---|---|---|
+| `CUT000AUS0` | 7.3 km | MSM7 | GPS, GLO, GAL, QZS, BDS | 1019, 1020 | 12 kbit/s |
+| `SALT00AUS0` | 6.9 km | MSM4 | GPS, GLO, QZS, BDS | none | 3.9 kbit/s |
+| `PERT00AUS0` | 21.0 km | not measured | | | |
 
-Both of the near mounts are single-base and advertise that they do not need GGA
-feedback. A 7 km baseline sits comfortably inside the 20-30 km where single-base
-RTK holds 2-3 cm.
+Those figures come from pulling 15 s off each mount, not from the source table.
+`CUT000AUS0` is the default even though it is 400 m further: MSM7 rather than
+MSM4, Galileo actually present where Salter Point advertises it but does not
+broadcast it, and embedded GPS and GLONASS ephemerides so a cold-started
+receiver need not wait on the satellites' own navigation message before fixing.
+Both are single-base mounts needing no GGA feedback, and a 7 km baseline sits
+comfortably inside the 20-30 km where single-base RTK holds 2-3 cm.
 
 Credentials are read from the environment, never committed:
 
