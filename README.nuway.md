@@ -76,21 +76,61 @@ Removed files that are either byte-identical to upstream or never loaded by any 
 `robosense_Bpearl/Helios.launch.xml`, `ring_outlier_filter_node.param.yaml`,
 `distortion_corrector_node.param.yaml`. The smaller the diff surface, the easier future Autoware upgrades.
 
-## RTK / NTRIP status
+## RTK / NTRIP
 
-The `ntrip` package **has been removed from this branch** (see the commit that removed it — its commit message records the full implementation analysis).
-Reason for removal: it doesn't build, isn't referenced by any launch file, and RTK isn't on the critical path —
-Autoware localizes against the point cloud map with NDT, GNSS only supplies the initial pose, and `pose_initializer`'s
-`pose_error_threshold` is 5 m, so meter-level GNSS accuracy is enough for NDT to converge (verified on hardware: `status=0`, σ≈2.9 m, initializes successfully on the first try).
+The `ntrip` package is built and wired for **AUSCORS**, the free national CORS
+service run by Geoscience Australia. Register once at
+<https://gnss.ga.gov.au/registration>; approval is automatic and takes minutes.
 
-If RTK is needed later, recover it with `git show <that commit>^:nuway_packages/nuway_sensor_kit_launch/ntrip/...`,
-or reintroduce it from `uwa-rev/autoware_on_nUWAy`. Reviving it takes three steps:
-`sudo apt install ros-humble-mavros-msgs ros-humble-rtcm-msgs` (both are available via apt, just not installed),
-add `rtcm_msgs` to `package.xml` (it's already in CMakeLists but missing from package.xml),
-and switch to a reachable caster.
+Mountpoints nearest UWA Crawley, measured from the AUSCORS source table:
 
-⚠ **The original `ntrip-param.yaml` had a username and password committed in plaintext; it's in the git history now, and deleting the file doesn't erase it.
-Those credentials must be rotated.** When restoring this, read them from environment variables instead — don't write them into the repo again.
+| Distance | Mountpoint | Format | Site |
+|---|---|---|---|
+| 6.9 km | `SALT00AUS0` | RTCM 3.3 | Salter Point (WA) - the default |
+| 7.3 km | `CUT000AUS0` | RTCM 3.3 | Perth (Curtin) |
+| 21.0 km | `PERT00AUS0` | RTCM 3.3 | Gnangara (WA) |
+
+Both of the near mounts are single-base and advertise that they do not need GGA
+feedback. A 7 km baseline sits comfortably inside the 20-30 km where single-base
+RTK holds 2-3 cm.
+
+Credentials are read from the environment, never committed:
+
+```bash
+export NTRIP_USER='<your AUSCORS username>'
+read -s NTRIP_PASS && export NTRIP_PASS
+ros2 launch ntrip ntrip_launch.py
+```
+
+`NTRIP_HOST` and `NTRIP_MOUNTPOINT` override the defaults the same way.
+
+On the SBG vehicle nothing else is needed: `sbg_params.yaml` already sets
+`rtcm.subscribe: true` and `nmea.publish: true`, and the topic names line up with
+this client, so corrections reach the receiver and GGA flows back out.
+
+A NovAtel vehicle needs a different arrangement. Its ROS driver publishes
+`/gps/fix` but exposes no RTCM input - inspecting `libnovatel_oem7_driver.so`
+shows subscriptions only to its own messages - so run the receiver's built-in
+NTRIP client instead (`NTRIPCONFIG` over an NCOM port), or pipe RTCM into its
+serial port. Note also that a single antenna gives no INS heading, so
+`use_gnss_ins_orientation` must stay false and `gnss_poser` derives heading from
+successive positions.
+
+RTK remains optional for localization: NDT matches against the pointcloud map and
+GNSS only supplies the initial pose, where `pose_initializer` accepts a 5 m error.
+An unaugmented fix - status 0, sigma about 2.9 m - already initialises on the
+first attempt.
+
+Two defects had to be fixed before this package would build, both of them
+mis-declared dependencies rather than anything to do with the caster.
+`mavros_msgs` was declared and included but never used, since the publisher is
+`rtcm_msgs::msg::Message`; `rtcm_msgs` was named in CMakeLists but missing from
+`package.xml`, so rosdep never installed it. An earlier note here blamed apt for
+not carrying `mavros_msgs`, which was wrong on both counts.
+
+⚠ A previous revision of `config/ntrip-param.yaml` committed a real username and
+password. They are in this repository's history, where deleting the file does not
+reach them, so those credentials must be rotated.
 
 ## Known TODOs
 
