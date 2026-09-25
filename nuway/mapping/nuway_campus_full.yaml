@@ -1,0 +1,50 @@
+/**:
+  ros__parameters:
+    preprocess:
+      lidar_type: 2
+      scan_line: 16
+      scan_rate: 10
+      # merge_velodyne_clouds.py normalizes PointCloud2 time to seconds
+      # from the merged scan start. FAST-LIO converts seconds to ms.
+      timestamp_unit: 0
+      blind: 0.8
+      blind_for_human_pilot: 1.0
+
+    mapping:
+      acc_cov: 0.1
+      gyr_cov: 0.1
+      b_acc_cov: 0.0001
+      b_gyr_cov: 0.0001
+      fov_degree: 360.0
+      det_range: 120.0
+      extrinsic_est_en: false
+
+      # The merged cloud is already transformed into base_link. FAST-LIO expects
+      # p_imu = extrinsic_R * p_lidar + extrinsic_T, so this is base_link wrt
+      # imu_link from nuway_vtr_tf.urdf.xml.
+      extrinsic_T: [0.0, 0.0, -2.4]
+      extrinsic_R: [1.0, 0.0, 0.0,
+                    0.0, 1.0, 0.0,
+                    0.0, 0.0, 1.0]
+
+    filter_size_map: 0.3
+
+    publish:
+      path_en: true
+      scan_publish_en: true
+      dense_publish_en: false
+      scan_lidarframe_pub_en: false
+      scan_bodyframe_pub_en: false
+      scan_baseframe_pub_en: true
+
+    pcd_save:
+      pcd_save_en: false
+      interval: -1
+
+    verbose: true
+    pcl_verbose: false
+    runtime_pos_log_enable: false
+    point_filter_num_for_preprocessing: 1
+    point_filter_num: 4
+    max_iteration: 4
+    cube_side_length: 1000.0

@@ -1,0 +1,190 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded: ~
+    Tree Height: 700
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Background Color: 32; 32; 36
+    Fixed Frame: map
+    Frame Rate: 20
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 10
+      Plane Cell Count: 40
+      Color: 70; 70; 78
+      Reference Frame: map
+
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Show Axes: true
+      Show Names: false
+      Show Arrows: false
+      Marker Scale: 2
+      Frame Timeout: 15
+
+    # 点云地图（latched，必须用 transient_local 才收得到）
+    - Class: rviz_default_plugins/PointCloud2
+      Name: 点云地图
+      Enabled: true
+      Topic:
+        Value: /map/pointcloud_map
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+      Style: Points
+      Size (Pixels): 1
+      Color Transformer: AxisColor
+      Axis: Z
+      Autocompute Value Bounds: false
+      Min Value: -2
+      Max Value: 12
+      Alpha: 0.35
+      Decay Time: 0
+
+    # 实时扫描（适配器合并后的双雷达点云，base_link 系）
+    - Class: rviz_default_plugins/PointCloud2
+      Name: 实时扫描
+      Enabled: true
+      Topic:
+        Value: /sensing/lidar/concatenated/pointcloud
+        Depth: 2
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+        History Policy: Keep Last
+      Style: Flat Squares
+      Size (m): 0.12
+      Color Transformer: FlatColor
+      Color: 255; 200; 40
+      Alpha: 1
+      Decay Time: 0
+
+    # NDT 实际用来配准的降采样点云
+    - Class: rviz_default_plugins/PointCloud2
+      Name: NDT 输入(降采样)
+      Enabled: false
+      Topic:
+        Value: /localization/util/downsample/pointcloud
+        Depth: 2
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+        History Policy: Keep Last
+      Style: Flat Squares
+      Size (m): 0.3
+      Color Transformer: FlatColor
+      Color: 0; 255; 255
+      Alpha: 1
+
+    # NDT 对齐后的点云：与地图重合说明匹配good
+    - Class: rviz_default_plugins/PointCloud2
+      Name: NDT 对齐结果
+      Enabled: true
+      Topic:
+        Value: /localization/pose_estimator/points_aligned
+        Depth: 2
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+      Style: Flat Squares
+      Size (m): 0.25
+      Color Transformer: FlatColor
+      Color: 60; 255; 120
+      Alpha: 1
+
+    - Class: rviz_default_plugins/PoseWithCovariance
+      Name: NDT 位姿
+      Enabled: true
+      Topic:
+        Value: /localization/pose_estimator/pose_with_covariance
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+      Shape: Arrow
+      Color: 60; 255; 120
+      Alpha: 1
+      Shaft Length: 2
+      Shaft Radius: 0.3
+      Head Length: 0.8
+      Head Radius: 0.6
+      Covariance:
+        Value: true
+        Position:
+          Alpha: 0.3
+          Color: 204; 51; 204
+          Scale: 1
+        Orientation:
+          Value: false
+
+    - Class: rviz_default_plugins/PoseWithCovariance
+      Name: GNSS 位姿(无RTK)
+      Enabled: true
+      Topic:
+        Value: /sensing/gnss/pose_with_covariance
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+      Shape: Arrow
+      Color: 255; 85; 85
+      Alpha: 0.9
+      Shaft Length: 1.5
+      Shaft Radius: 0.25
+      Head Length: 0.6
+      Head Radius: 0.5
+      Covariance:
+        Value: true
+        Position:
+          Alpha: 0.2
+          Color: 255; 85; 85
+          Scale: 1
+        Orientation:
+          Value: false
+
+    - Class: rviz_default_plugins/Odometry
+      Name: 定位输出轨迹
+      Enabled: true
+      Topic:
+        Value: /localization/kinematic_state
+        Depth: 500
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+      Keep: 500
+      Position Tolerance: 0.5
+      Angle Tolerance: 0.3
+      Shape:
+        Value: false
+      Covariance:
+        Value: false
+
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+      Line color: 128; 128; 0
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Distance: 90
+      Pitch: 0.85
+      Yaw: 3.1
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0
+      Target Frame: base_link
+      Near Clip Distance: 0.1
+  Global Options Extra: ~
+Window Geometry:
+  Height: 1000
+  Width: 1700
+  Displays:
+    collapsed: false

@@ -1,0 +1,57 @@
+---
+# 双雷达 + 重力对齐 的建图 launch。基于 spark_fast_lio 的 mapping_nuway_campus.launch.yaml，
+# 只改三处：
+#   1. lidar_topic/lidar_frame/config_path 默认值指向 merge_velodyne_clouds.py 的合并云
+#      (已在 base_link, 保留逐点 time 且归一到合并帧起点)
+#   2. 去掉 rviz 节点(无头运行)
+#
+# gravity_alignment 保持 false —— 试过开启, 但它永不完成(实测卡在
+# "Gravity alignment is enabled but not yet completed", 收集器 0 帧)。原因在
+# isMotionStopped(): `‖acc_ref − acc_curr‖ <= acc_diff_thr(0.2)` 即判定静止,
+# 而 nUWAy 以 1.25 m/s 匀速缓行, 加速度变化超不过该阈值, 计数器永远归零。
+# 该功能是给会被搬动/急动的机器人设计的。地图的重力对齐改为事后用地面平面做一次 SE(3) 校平,
+# 是否合法由 check_map.py 的"恒定倾角 vs 累积漂移"判读决定。
+launch:
+  - arg: {name: use_sim_time, default: 'true'}
+  - arg: {name: map_frame, default: 'fast_lio_odom'}
+  - arg: {name: base_frame, default: 'base_link'}
+  - arg: {name: imu_frame, default: 'imu_link'}
+  - arg: {name: lidar_frame, default: 'base_link'}
+  - arg: {name: lidar_topic, default: '/lidar/velodyne/merged/cloud'}
+  - arg: {name: config_path, default: $(find-pkg-share spark_fast_lio)/config/nuway_campus_merged.yaml}
+
+  - node:
+      pkg: spark_fast_lio
+      exec: spark_lio_mapping
+      name: fast_lio2_nuway
+      output: screen
+      on_exit: shutdown
+
+      remap:
+        - {from: 'lidar', to: "$(var lidar_topic)"}
+        - {from: 'imu', to: '/imu/data'}
+        - {from: 'odometry', to: '/Odometry'}
+        - {from: 'path', to: '/fast_lio/path'}
+        - {from: 'cloud_registered', to: '/fast_lio/cloud_registered'}
+        - {from: 'cloud_registered_base', to: '/fast_lio/cloud_registered_base'}
+
+      param:
+        - name: use_sim_time
+          value: "$(var use_sim_time)"
+        - name: "common.map_frame"
+          value: "$(var map_frame)"
+        - name: "common.base_frame"
+          value: "$(var base_frame)"
+        - name: "common.imu_frame"
+          value: "$(var imu_frame)"
+        - name: "common.lidar_frame"
+          value: "$(var lidar_frame)"
+        - name: "common.visualization_frame"
+          value: "base"
+        - name: "common.time_sync_en"
+          value: false
+        - name: "gravity_alignment.enable_gravity_alignment"
+          value: false
+        - name: "extrinsics_timeout_s"
+          value: 20.0
+        - from: $(var config_path)
