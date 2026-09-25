@@ -47,6 +47,9 @@ so it has to be maintained as a patch and reapplied every time.
 | `patches/` | One-line cuda_blackboard patch; canbridge's missing dependency declaration + apply script |
 | `nuway/` | Environment variables, DDS sysctl, build script |
 | `docs/build-on-orin.md` | Full SOP: 10 steps + 13 gotchas + troubleshooting index |
+| `docs/mapping-and-localization.md` | Mapping and NDT localization: the toolchain, the measurements, and what was ruled out |
+| `docs/vehicle-bringup.md` | **On-vehicle bring-up order**, per-vehicle sensor differences, and what to check at each stage |
+| `nuway/vehicle_preflight.sh` | Readiness check on the vehicle (read-only unless `--apply-net`) |
 
 The nuway suite's original `common_sensor_launch` has been removed — 1.9.0's `autoware_launch` ships its own package of the same name (a newer version, 0.52.0 vs 0.50.0, the difference being an upstream refactor), and keeping both would abort colcon with a duplicate. The one nuway customization it carried (the distortion-correction threshold) is preserved as `patches/0002`.
 
