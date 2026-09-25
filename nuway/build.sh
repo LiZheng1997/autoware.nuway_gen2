@@ -1,17 +1,19 @@
 #!/bin/bash
-# nUWAy Autoware 1.9.0 原生编译（Orin AGX）。实测 488/488，约 2h23min。
+# Native build of Autoware 1.9.0 for nUWAy (Orin AGX). Measured: 488/488 packages, about 2 h 23 min.
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 source /opt/ros/humble/setup.bash
 
-# GCC 11：ROS 2 Humble 的 apt 包由 GCC 11 构建；GCC 9 会对 std::optional
-# 的 `return {};` 误报 maybe-uninitialized，叠加 Autoware 的 -Werror 成为硬错误。
+# GCC 11 is required: the ROS 2 Humble apt packages are built with GCC 11, and GCC 9
+# raises a spurious maybe-uninitialized warning on `return {};` for std::optional,
+# which Autoware's -Werror turns into a hard error.
 export CC=/usr/bin/gcc-11 CXX=/usr/bin/g++-11
 export CUDA_HOME=/usr/local/cuda-12.8
 export PATH=/usr/local/cuda-12.8/bin:$PATH
-# 12 核开满会 OOM：tensorrt_yolox / lidar_centerpoint / bevdet_vendor 的单个
-# CUDA 编译单元能吃数 GB。实测下列组合全程可用内存 > 50 GB。
+# Using all 12 cores runs out of memory: a single CUDA translation unit in
+# tensorrt_yolox, lidar_centerpoint or bevdet_vendor can consume several GB. The
+# combination below was measured to keep more than 50 GB free throughout.
 export MAKEFLAGS=-j3
 
 colcon build --symlink-install --continue-on-error --parallel-workers 4 \

@@ -1,18 +1,18 @@
-Subject: [PATCH] cuda_blackboard: 用 cudaGetDevice 替代 cudaStreamGetDevice
+Subject: [PATCH] cuda_blackboard: replace cudaStreamGetDevice with cudaGetDevice
 
-cudaStreamGetDevice 不仅需要 CUDA 12.8 的头文件，运行时还需要 12.8 的驱动。
-JetPack 6.x 的驱动最高是 CUDA 12.6，调用会返回
-cudaErrorCallRequiresNewerDriver (36)，导致 pointcloud_container 构造函数抛异常
-而 abort —— 点云预处理/拼接整条链消失，下游表现为
+cudaStreamGetDevice doesn't just need the CUDA 12.8 headers to compile — it also needs the 12.8 driver at runtime.
+JetPack 6.x tops out at the CUDA 12.6 driver, so the call returns
+cudaErrorCallRequiresNewerDriver (36), which makes the pointcloud_container constructor throw
+and abort — the entire point cloud preprocessing/concatenation chain disappears, and downstream this shows up as
   ndt_scan_matcher: No InputSource
   /api/localization/initialize: align server failed
-极具误导性。
+which is highly misleading.
 
-stream_ 是紧邻两行前在当前设备上创建的，用 cudaGetDevice 取当前设备号等价，
-且无驱动版本要求。
+stream_ was created on the current device just two lines above, so reading the current device number via cudaGetDevice is equivalent,
+and it carries no driver version requirement.
 
-实测（Orin AGX / JetPack 6.2 / L4T R36.4.3）：打补丁前每轮固定死 1 个进程，
-打补丁后进程死亡 0、cudaError 0。
+Tested on hardware (Orin AGX / JetPack 6.2 / L4T R36.4.3): before the patch, exactly 1 process died every run;
+after the patch, 0 process deaths and 0 cudaErrors.
 ---
 --- a/src/cuda_mem_pool_context.cpp
 +++ b/src/cuda_mem_pool_context.cpp

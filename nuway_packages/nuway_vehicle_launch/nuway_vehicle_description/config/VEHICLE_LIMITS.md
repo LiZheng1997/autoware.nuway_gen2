@@ -1,46 +1,45 @@
-# EZ10 Gen2 的 CAN 侧限制（供配置参考）
+# EZ10 Gen2 CAN-side limits (reference for configuration)
 
-来源：`canbridge_cpp/GEN2-Docs/EM-EZ10PROD-IDD-00011-EN-rev21.06-*.pdf`
+Source: `canbridge_cpp/GEN2-Docs/EM-EZ10PROD-IDD-00011-EN-rev21.06-*.pdf`
 
-| 项目 | CAN 信号 | 帧 ID | 范围 | 备注 |
+| Item | CAN Signal | Frame ID | Range | Notes |
 |---|---|---|---|---|
-| 前轮转角 | `c_PCN_Front_Steering_Setpoint` | 0x193 byte 4-5 | −0.3141 ~ +0.3141 rad（±18°） | 因子 0.0001，即 rad×10000 |
-| 后轮转角 | `c_PCN_Rear_Steering_Setpoint` | 0x193 byte 6-7 | −0.3141 ~ +0.3141 rad | 前后**必须反号**，同号被禁止（防止横向平移） |
-| 速度 | 牵引指令 | — | −7.0 ~ +7.0 m/s | 因子 0.001，+1000 ⇔ 1 m/s；负值后退 |
-| 加速度 | — | — | 0.3 ~ 1.0 m/s² | 超范围则用默认 0.5 |
-| 减速度 | — | — | −1.5 ~ −0.3 m/s² | 超范围则用默认 −0.8 |
-| 转向速率 | — | — | 随速度变化（见文档曲线） | **超出 +0.20 rad/s 触发整车急停** |
+| Front wheel steering angle | `c_PCN_Front_Steering_Setpoint` | 0x193 byte 4-5 | −0.3141 ~ +0.3141 rad (±18°) | Factor 0.0001, i.e. rad×10000 |
+| Rear wheel steering angle | `c_PCN_Rear_Steering_Setpoint` | 0x193 byte 6-7 | −0.3141 ~ +0.3141 rad | Front and rear **must have opposite signs** — same sign is prohibited (prevents lateral translation) |
+| Speed | Traction command | — | −7.0 ~ +7.0 m/s | Factor 0.001, +1000 ⇔ 1 m/s; negative values mean reverse |
+| Acceleration | — | — | 0.3 ~ 1.0 m/s² | Out-of-range values fall back to the default of 0.5 |
+| Deceleration | — | — | −1.5 ~ −0.3 m/s² | Out-of-range values fall back to the default of −0.8 |
+| Steering rate | — | — | Varies with speed (see the curve in the doc) | **Exceeding +0.20 rad/s triggers a full vehicle emergency stop** |
 
-## 这些值与 `vehicle_info.param.yaml` 的关系
+## How these values relate to `vehicle_info.param.yaml`
 
-**上表的 ±0.3141 rad 是物理轮转角，`vehicle_info.param.yaml` 里的
-`max_steer_angle` 是等效单轨（自行车）模型参数，两者不是同一个量，不应直接比较。**
+**The ±0.3141 rad in the table above is the physical wheel steering angle; the
+`max_steer_angle` in `vehicle_info.param.yaml` is an equivalent single-track (bicycle) model parameter. These are not the same quantity and should not be compared directly.**
 
-EZ10 前后双轴反向等角转向时，转弯半径 `R = L / (2·tanδ)`，而单轴转向是
-`R = L / tanδ`。同样半径下等效单轨转角 `δ_eq = atan(2·tanδ)`：
+When EZ10 steers both axles at equal and opposite angles, the turning radius is `R = L / (2·tanδ)`, whereas single-axle steering gives
+`R = L / tanδ`. For the same radius, the equivalent single-track steering angle is `δ_eq = atan(2·tanδ)`:
 
 ```
 δ_phys = 0.3141 rad (18°)  →  δ_eq = atan(2·tan 0.3141) ≈ 0.576 rad (33°)
 ```
 
-当前配置的 `max_steer_angle: 0.70` 与该量级一致，且**已由实车测试确认**，
-沿用即可。本文档只记录 CAN 侧的原始限制，供纵向控制限幅、转向速率余量等
-配置时参考。
+The current `max_steer_angle: 0.70` configuration is consistent with this order of magnitude and **has been confirmed by real-vehicle testing**,
+so it can be kept as-is. This document only records the raw CAN-side limits, for reference when configuring
+longitudinal control clamping, steering-rate margins, and similar parameters.
 
-## 对 Autoware 配置的实际影响
+## Practical impact on Autoware configuration
 
-1. **纵向控制的加减速限幅**应落在上表区间内，否则指令会被车端改写成默认值
-   （0.5 / −0.8 m/s²），实际表现与规划不符。
-2. **转向速率**必须留余量——超出 +0.20 rad/s 会触发整车急停。
-3. 转角超过 3.94° 时车辆会**自动限速**以满足最大侧向加速度；规划的速度曲线
-   若不考虑这点，跟踪会持续滞后。
-4. EZ10 是**前后双轴转向**（CAN 里有 `s_MECU_Front_Steering_Axle_Select`、
-   `FSC`、`axle_2`），而 Autoware 默认是前轮转向模型——涉及转弯半径的
-   参数需按上面的等效关系换算，不要直接填物理轮角。
+1. **Longitudinal control's acceleration/deceleration clamps** should stay within the ranges in the table above; otherwise the vehicle side will rewrite the command to the default value
+   (0.5 / −0.8 m/s²), and actual behavior won't match what was planned.
+2. **Steering rate** must keep a margin — exceeding +0.20 rad/s triggers a full vehicle emergency stop.
+3. Once the steering angle exceeds 3.94°, the vehicle will **automatically limit its speed** to stay within the maximum lateral acceleration; if the planned speed profile doesn't account for this, tracking will persistently lag.
+4. EZ10 steers on **both the front and rear axles** (the CAN signals include `s_MECU_Front_Steering_Axle_Select`,
+   `FSC`, `axle_2`), while Autoware's default is a front-wheel-steering model — any parameter involving turning radius
+   needs to be converted using the equivalence above; don't plug in the physical wheel angle directly.
 
-## 几何尺寸
+## Geometry
 
-`wheel_base` / `wheel_tread` / 前后悬 / 车高等与 Autoware `sample_vehicle` 相同
-（仅 `max_steer_angle` 不同）。这两份 CAN 文档是命令手册，不含几何尺寸，
-无法据此核对。如需确认可对照 `mirror.param.yaml`（横向 ±1.4 m，已实测）
-或实车测量。
+`wheel_base` / `wheel_tread` / front and rear overhang / vehicle height, etc. match Autoware's `sample_vehicle`
+(only `max_steer_angle` differs). The two CAN documents are command manuals and don't include geometry,
+so they can't be used to verify this. To confirm, cross-check against `mirror.param.yaml` (lateral ±1.4 m, measured on the real vehicle)
+or measure the actual vehicle.

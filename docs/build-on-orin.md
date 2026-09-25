@@ -1,48 +1,48 @@
-# Orin 原生编译 Autoware 1.9
+# Native Build of Autoware 1.9 on Orin
 
-在 AGX Orin 开发套件上从源码编译 Autoware 1.9.0，不使用 Docker。
+Building Autoware 1.9.0 from source on an AGX Orin Developer Kit, without Docker.
 
-**实测结果**：488/488 包全部成功，耗时 2 小时 23 分，零失败（2026-09-22）。
+**Verified result**: 488/488 packages built successfully in 2h 23min, zero failures (2026-09-22).
 
 ---
 
-## 1. 适用环境
+## 1. Applicable Environment
 
-| 项 | 本文验证的版本 |
+| Item | Version verified in this document |
 |---|---|
-| 硬件 | Jetson AGX Orin 开发套件（p3737-0000 + p3701-0005，64 GB） |
-| 系统 | JetPack 6.2 / L4T **R36.4.3** / 内核 5.15.148-tegra |
-| JetPack 组件 | nvidia-jetpack **6.2+b77** |
-| 驱动侧 CUDA | 12.6（JetPack 自带，**不要动**） |
-| 编译侧 CUDA | **12.8**（单独装，见步骤 2） |
-| TensorRT | 10.3.0.30（JetPack 自带） |
-| cuDNN | 9.3.0.75（JetPack 自带） |
+| Hardware | Jetson AGX Orin Developer Kit (p3737-0000 + p3701-0005, 64 GB) |
+| OS | JetPack 6.2 / L4T **R36.4.3** / kernel 5.15.148-tegra |
+| JetPack component | nvidia-jetpack **6.2+b77** |
+| Driver-side CUDA | 12.6 (bundled with JetPack, **do not touch**) |
+| Build-side CUDA | **12.8** (installed separately, see Step 2) |
+| TensorRT | 10.3.0.30 (bundled with JetPack) |
+| cuDNN | 9.3.0.75 (bundled with JetPack) |
 | GCC | **11.4.0** |
-| Autoware | tag **1.9.0**（488 个包） |
-| 磁盘 | 编译期间至少预留 20 GB（install 351 MB + build 4.3 GB + 依赖） |
+| Autoware | tag **1.9.0** (488 packages) |
+| Disk | reserve at least 20 GB during the build (install 351 MB + build 4.3 GB + dependencies) |
 
 ---
 
-## 2. 环境要求与理由
+## 2. Environment Requirements and Rationale
 
-这四项**必须先满足**，否则编译一定失败。它们的顺序不能颠倒——每解决一个才看得见下一个。
+These four prerequisites **must be satisfied first**, or the build is guaranteed to fail. Their order cannot be swapped — each one only becomes visible once the previous one is resolved.
 
-### GCC 必须是 11
+### GCC must be version 11
 
-ROS 2 Humble 的 apt 二进制包全部用 GCC 11 构建。若系统默认编译器不是 11：
+All of ROS 2 Humble's apt binary packages are built with GCC 11. If the system's default compiler is not 11:
 
-- GCC 9 对 `std::optional` + `return {};` 会误报 `maybe-uninitialized`，配合 Autoware 的 `-Werror` 直接变成硬错误
-- GCC 9 产物与 GCC 11 编译的 ROS 库存在 ABI 风险
+- GCC 9 falsely reports `maybe-uninitialized` for `std::optional` + `return {};`, which combined with Autoware's `-Werror` turns straight into a hard build error
+- Binaries built with GCC 9 carry ABI risk against ROS libraries built with GCC 11
 
 ```bash
-gcc --version    # 必须是 11.x
+gcc --version    # must be 11.x
 ```
 
-若不是，见步骤 1。**注意** Ubuntu 22.04 自带 CMake 3.22，因此 `CMAKE_COMPILE_WARNING_AS_ERROR`（需 ≥3.24）这条关闭 `-Werror` 的路走不通。
+If it isn't, see Step 1. **Note** that Ubuntu 22.04 ships CMake 3.22, so the route of disabling `-Werror` via `CMAKE_COMPILE_WARNING_AS_ERROR` (which needs ≥3.24) is not available.
 
-### 编译侧 CUDA 必须是 12.8
+### Build-side CUDA must be 12.8
 
-Autoware 1.9.0 在 `ansible/roles/cuda/defaults/main.yaml` 里明确写着：
+Autoware 1.9.0 states this explicitly in `ansible/roles/cuda/defaults/main.yaml`:
 
 ```yaml
 # CUDA 12.8 on Ubuntu 22.04 (humble / Jetson Orin via JetPack 6).
@@ -50,13 +50,13 @@ cuda_version: "{{ '13.0' if ansible_distribution_version == '24.04' else '12.8' 
 cuda_repo_distro: "{{ 'ubuntu2404' if ... else 'ubuntu2204' }}"
 ```
 
-**JetPack 6.x 全系列只提供 CUDA 12.6**（实测 r36.4 仓库里 nvidia-cuda 的 6.1+b123 / 6.2+b77 / 6.2.1+b38 三个版本都依赖 `cuda-12-6`）。所以升级 L4T 小版本拿不到 12.8，只能从 NVIDIA 的 `ubuntu2204` CUDA 仓库单独安装工具链。
+**The entire JetPack 6.x line only ships CUDA 12.6** (verified: in the r36.4 repository, all three nvidia-cuda versions — 6.1+b123 / 6.2+b77 / 6.2.1+b38 — depend on `cuda-12-6`). So bumping the L4T point release will never get you 12.8; the toolchain has to be installed separately from NVIDIA's `ubuntu2204` CUDA repository.
 
-差别是实打实的：`cuda_blackboard` 0.4.0 使用 `cudaStreamGetDevice()`，该函数在 CUDA 12.6 与 12.2 的头文件里都不存在。
+The difference is concrete: `cuda_blackboard` 0.4.0 uses `cudaStreamGetDevice()`, a function that does not exist in the headers of either CUDA 12.6 or 12.2.
 
-> ### ⚠️ 但装了 12.8 也只是能**编过**——必须同时打第 7 节那个一行补丁
+> ### ⚠️ But installing 12.8 only gets you a **build that compiles** — the one-line patch in Section 7 must be applied as well
 >
-> `cudaStreamGetDevice` 不只需要 12.8 的**头文件**，运行时还需要 12.8 的**驱动**。而 **JetPack 6.x 的驱动最高是 CUDA 12.6，拿不到 12.8 驱动**。实测：
+> `cudaStreamGetDevice` needs not only the 12.8 **headers** but also the 12.8 **driver** at runtime. And **the newest driver JetPack 6.x ships is CUDA 12.6 — there is no way to get a 12.8 driver**. Measured:
 >
 > ```
 > runtime=12080  driver=12060
@@ -64,44 +64,44 @@ cuda_repo_distro: "{{ 'ubuntu2404' if ... else 'ubuntu2204' }}"
 > cudaGetDevice        ->  0 (cudaSuccess)                        dev=0
 > ```
 >
-> 结果就是 488 个包全部编译成功，但 `pointcloud_container` **启动即 abort**，点云预处理/拼接整条链没了。详见第 5 节「cuda_blackboard 在 JetPack 上必须打补丁」。
+> The result is that all 488 packages build successfully, yet `pointcloud_container` **aborts on startup**, taking out the entire point cloud preprocessing/concatenation chain. See Section 5, "`cuda_blackboard` must be patched on JetPack", for details.
 >
-> 而且 `cudaStreamGetDevice` 在**全部 488 个包里只出现一次**（就是 `cuda_blackboard` 那一行）。也就是说，打完那个补丁之后，CUDA 12.8 这整条 SBSA 绕路很可能都不必要，直接用 JetPack 自带的 12.6 即可（源码证据确定，但未重跑完整构建验证）。
+> What's more, `cudaStreamGetDevice` appears **exactly once across all 488 packages** (that one line in `cuda_blackboard`). In other words, once that patch is applied, the entire CUDA 12.8 SBSA detour is quite possibly unnecessary and JetPack's bundled 12.6 would do (confirmed by source inspection, but not re-verified with a full rebuild).
 
-### 驱动侧 CUDA / TensorRT / cuDNN 保持 JetPack 自带
+### Keep driver-side CUDA / TensorRT / cuDNN as shipped by JetPack
 
-只装 CUDA **工具链**，不要装 `cuda-drivers`——在 Jetson 上安装桌面驱动包会破坏 Tegra 图形与 GPU 栈。`setup-dev-env.sh` 的 `--no-cuda-drivers` 选项存在的意义就是这个。
+Install only the CUDA **toolchain**, never `cuda-drivers` — installing the desktop driver package on a Jetson breaks the Tegra graphics and GPU stack. That is exactly why `setup-dev-env.sh` has a `--no-cuda-drivers` option.
 
-TensorRT 方面，ansible 默认钉 `10.3.0.26-1+cuda12.5`，而 JetPack 6.2 给的是 `10.3.0.30-1+cuda12.5`。**不必强求一致**：同为 TRT 10.3，且 JetPack 版本才是针对 Orin 集成 GPU 构建的。上机前建议实测一次引擎构建：
+For TensorRT, ansible pins `10.3.0.26-1+cuda12.5` by default, while JetPack 6.2 ships `10.3.0.30-1+cuda12.5`. **There's no need to force them to match**: both are TRT 10.3, and it's the JetPack version that is actually built for Orin's integrated GPU. Before relying on it, it's worth test-building an engine once:
 
 ```bash
 /usr/src/tensorrt/bin/trtexec \
   --onnx=$HOME/autoware_data/lidar_centerpoint/pts_voxel_encoder_centerpoint.onnx \
   --saveEngine=/tmp/t.plan --skipInference
-# 期望: "Engine built in ... sec" + "&&&& PASSED"
+# expected: "Engine built in ... sec" + "&&&& PASSED"
 ```
 
-### 换过编译器或 CUDA 之后必须清构建树
+### The build tree must be cleaned after switching compiler or CUDA
 
-`build/*/CMakeCache.txt` 会缓存 CUDA 版本与编译器路径。换环境后不清，会出现"`/usr/local/cuda` 明明是 12.8，却报 Found unsuitable version 12.6"这类自相矛盾的错误。
+`build/*/CMakeCache.txt` caches the CUDA version and compiler paths. If it isn't cleared after switching environments, you get self-contradictory errors like "`/usr/local/cuda` is clearly 12.8, yet it reports Found unsuitable version 12.6."
 
 ---
 
-## 3. 步骤
+## 3. Steps
 
-### 步骤 0：前置检查
+### Step 0: Preflight checks
 
 ```bash
-cat /proc/device-tree/model            # 应为 Jetson AGX Orin Developer Kit
+cat /proc/device-tree/model            # should read Jetson AGX Orin Developer Kit
 head -1 /etc/nv_tegra_release          # R36 REVISION: 4.3
-nproc; free -g; df -h /                # 12 核 / 61 G / 预留 ≥20 G
-sudo nvpmodel -q | tail -2             # 建议 MAXN
-docker ps                              # 应为空：容器抢 CPU 会拖慢编译
+nproc; free -g; df -h /                # 12 cores / 61 G / reserve >=20 G
+sudo nvpmodel -q | tail -2             # MAXN recommended
+docker ps                              # should be empty: containers competing for CPU will slow down the build
 ```
 
-### 步骤 1：切到 GCC 11
+### Step 1: Switch to GCC 11
 
-`gcc`/`g++` 各自是独立的 alternative，不能用 `--slave` 挂在一起。
+`gcc` and `g++` are independent alternatives; they cannot be linked together with `--slave`.
 
 ```bash
 sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 110
@@ -109,32 +109,32 @@ sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 110
 sudo update-alternatives --set gcc /usr/bin/gcc-11
 sudo update-alternatives --set g++ /usr/bin/g++-11
 
-gcc --version && g++ --version && cc --version && c++ --version   # 四个都要是 11.x
+gcc --version && g++ --version && cc --version && c++ --version   # all four must be 11.x
 ```
 
-### 步骤 2：安装 CUDA 12.8 工具链
+### Step 2: Install the CUDA 12.8 toolchain
 
 ```bash
-# 添加 NVIDIA CUDA 仓库（aarch64 用 sbsa 路径）
+# Add the NVIDIA CUDA repo (aarch64 uses the sbsa path)
 wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/sbsa/cuda-keyring_1.1-1_all.deb
 sudo dpkg -i cuda-keyring_1.1-1_all.deb
 sudo apt update
 
-# 先模拟，确认计划里没有任何驱动包
+# Dry-run first to confirm the plan contains no driver package
 sudo apt-get -s install cuda-toolkit-12-8 | grep -E "cuda-drivers|nvidia-driver|nvidia-kernel"
-#   ↑ 必须无输出
+#   ↑ must produce no output
 
 sudo apt-get install -y cuda-toolkit-12-8
 sudo update-alternatives --set cuda /usr/local/cuda-12.8
 
-# 验证
+# Verify
 readlink -f /usr/local/cuda                                   # /usr/local/cuda-12.8
 /usr/local/cuda/bin/nvcc --version | tail -2 | head -1        # release 12.8
-grep -rl cudaStreamGetDevice /usr/local/cuda-12.8/include/    # 必须命中 cuda_runtime_api.h
-dpkg -l | grep -E "^ii  (cuda-drivers|nvidia-driver)"         # 必须无输出
+grep -rl cudaStreamGetDevice /usr/local/cuda-12.8/include/    # must hit cuda_runtime_api.h
+dpkg -l | grep -E "^ii  (cuda-drivers|nvidia-driver)"         # must produce no output
 ```
 
-### 步骤 3：取源码
+### Step 3: Fetch the source
 
 ```bash
 git clone https://github.com/autowarefoundation/autoware.git ~/autoware
@@ -142,41 +142,41 @@ cd ~/autoware
 git fetch --tags
 git checkout 1.9.0
 mkdir src
-vcs import src < repositories/autoware.repos      # 32 个仓库
+vcs import src < repositories/autoware.repos      # 32 repositories
 
-find src -name package.xml | wc -l                # 期望 488
+find src -name package.xml | wc -l                # expect 488
 ```
 
-> **`src` 同级不要留旧检出。** 任何位于工作区内、含有同名包的目录（例如把旧 `src` 改名成 `src.bak`）都会让 colcon 以
-> `ERROR:colcon:colcon build: Duplicate package names not supported` 立即中止，**一个包都不编**。旧检出要移到工作区之外，
-> 或在其中放一个 `COLCON_IGNORE` 文件。
+> **Don't leave an old checkout next to `src`.** Any directory inside the workspace that contains packages with the same names (e.g. an old `src` renamed to `src.bak`) will make colcon abort immediately with
+> `ERROR:colcon:colcon build: Duplicate package names not supported`, **compiling not a single package**. Move old checkouts out of the workspace,
+> or drop a `COLCON_IGNORE` file inside them.
 
-### 步骤 4：安装依赖环境
+### Step 4: Install the dependency environment
 
 ```bash
 cd ~/autoware
 ./setup-dev-env.sh universe -y --no-nvidia
 ```
 
-`--no-nvidia` 跳过 `cuda` 与 `tensorrt` 两个角色，保护步骤 2 装好的工具链与 JetPack 自带的 TRT/cuDNN。
+`--no-nvidia` skips the `cuda` and `tensorrt` roles, protecting the toolchain installed in Step 2 and the TRT/cuDNN that JetPack already ships.
 
-若只想跳过驱动、让 ansible 自己装 CUDA/TRT，则用 `--no-cuda-drivers` 代替。
+If you only want to skip the driver and let ansible install CUDA/TRT itself, use `--no-cuda-drivers` instead.
 
-**判据**：结尾出现 `failed=0`。
+**Success criterion**: `failed=0` at the end.
 
-> `--no-nvidia` 的实现是 `--extra-vars prompt_install_nvidia=n`。ansible **对被跳过的任务同样会打印 `TASK [...]` 标题**，
-> 下一行才是 `skipping: [localhost]`。不要把任务标题当成"它在执行"的证据。
+> Under the hood, `--no-nvidia` is `--extra-vars prompt_install_nvidia=n`. ansible **prints the `TASK [...]` header for skipped tasks too** —
+> only the next line, `skipping: [localhost]`, tells you what actually happened. Don't treat a task header as proof that it ran.
 
-然后是 rosdep：
+Then rosdep:
 
 ```bash
 source /opt/ros/humble/setup.bash
 rosdep update --include-eol-distros
 rosdep install -y --from-paths src --ignore-src --rosdistro humble
-# 判据: "#All required rosdeps installed successfully"
+# success criterion: "#All required rosdeps installed successfully"
 ```
 
-### 步骤 5：编译
+### Step 5: Build
 
 ```bash
 cd ~/autoware
@@ -194,23 +194,23 @@ colcon build --symlink-install --continue-on-error --parallel-workers 4 \
                -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.8/bin/nvcc
 ```
 
-参数取舍：
+Parameter choices:
 
-- **`--parallel-workers 4` + `MAKEFLAGS=-j3`**：12 核开满会 OOM。`tensorrt_yolox`、`lidar_centerpoint`、`bevdet_vendor` 的单个 CUDA 编译单元能吃掉数 GB，构建中途被 OOM killer 打断的代价远高于慢一点。实测峰值可用内存始终 >50 GB。
-- **`-DCMAKE_CUDA_ARCHITECTURES=87`**：Orin 是 SM 87，只生成这一个架构的代码，省下可观时间。
-- **`--continue-on-error`**：首次编译要的是**一次拿到全部失败清单**，而不是卡在第一个。
+- **`--parallel-workers 4` + `MAKEFLAGS=-j3`**: running all 12 cores flat out triggers OOM. A single CUDA compilation unit in `tensorrt_yolox`, `lidar_centerpoint`, or `bevdet_vendor` can consume several GB, and having the build interrupted mid-way by the OOM killer costs far more than running a bit slower. Measured peak available memory stayed above 50 GB throughout.
+- **`-DCMAKE_CUDA_ARCHITECTURES=87`**: Orin is SM 87; generating code for only this one architecture saves a considerable amount of time.
+- **`--continue-on-error`**: what a first build needs is **the complete list of failures in one pass**, not to get stuck on the first one.
 
-**点火后前 2 分钟必须查一次**，而且要看正向进展的证据，不能只看"日志还没报错"：
+**Check once within the first 2 minutes after kicking off the build**, and look for positive evidence of progress — not just "the log hasn't shown an error yet":
 
 ```bash
-grep -c "Starting >>>" log/latest_build/../../colcon_build.log   # 应在增长
+grep -c "Starting >>>" log/latest_build/../../colcon_build.log   # should be growing
 grep -c "Finished <<<" colcon_build.log
-grep -cE "^ERROR:colcon" colcon_build.log                        # 应为 0
+grep -cE "^ERROR:colcon" colcon_build.log                        # should be 0
 ```
 
-长时间编译建议挂心跳，**连续两次无进展就报警**——编译卡死不该靠人盯着发现。
+For a long build, attach a heartbeat check and **alert after two consecutive checks with no progress** — a stalled build should not depend on a human staring at the terminal to notice.
 
-### 步骤 6：验证
+### Step 6: Verify
 
 ```bash
 grep "^Summary:" colcon_build.log     # Summary: 488 packages finished [2h 23min 17s]
@@ -219,18 +219,18 @@ grep -c "^Failed   <<<" colcon_build.log   # 0
 source install/setup.bash
 ros2 pkg list | wc -l                  # 849
 
-# CUDA 产物不是空壳：跟进 symlink 看真实文件，并确认依赖全部可解析
+# The CUDA build artifact is not an empty shell: follow the symlink to the real file and confirm all dependencies resolve
 L=$(readlink -f install/autoware_lidar_centerpoint/lib/libautoware_lidar_centerpoint_cuda_lib.so)
-ls -lL "$L"                            # 约 3.9 MB
+ls -lL "$L"                            # about 3.9 MB
 ldd "$L" | grep -c "not found"         # 0
 ```
 
-> `--symlink-install` 下，`install/` 里的 `.so` 是符号链接，`ls -l` 只会显示 92 字节左右的链接长度。
-> 必须 `readlink -f` 跟进真实文件再判断大小，否则会误判成"编出来是空的"。
+> Under `--symlink-install`, the `.so` files in `install/` are symlinks, so `ls -l` only shows a link length of around 92 bytes.
+> You must `readlink -f` to follow through to the real file before judging its size, otherwise you'll wrongly conclude "the build produced an empty file."
 
-### 步骤 7：运行期让 Autoware 找到 CUDA 12.8（**编译通过 ≠ 能跑**）
+### Step 7: Make Autoware find CUDA 12.8 at runtime (**a successful build ≠ a working run**)
 
-这一步不做，488 个包全部编译成功，但**一启动就有 15 个 CUDA 节点加载失败**：
+Skip this step and all 488 packages will still build successfully, but **15 CUDA nodes fail to load the moment you start**:
 
 ```
 [ERROR] Failed to load library: Could not load library dlopen error:
@@ -239,77 +239,77 @@ ldd "$L" | grep -c "not found"         # 0
   → pedestrian_traffic_light_classifier / lidar_centerpoint ...
 ```
 
-原因是**两种 CUDA 的目录布局不同**，而动态链接器的缓存不认编译期的 `-L`：
+The reason is that **the two CUDA installations use different directory layouts**, and the dynamic linker's cache doesn't honor the build-time `-L` flag:
 
-| 来源 | 库目录布局 |
+| Source | Library directory layout |
 |---|---|
-| JetPack 的 CUDA（Tegra 包） | `/usr/local/cuda-12.6/targets/**aarch64-linux**/lib` |
-| 单独装的 CUDA 12.8（**SBSA 包**） | `/usr/local/cuda-12.8/targets/**sbsa-linux**/lib` |
+| JetPack's CUDA (Tegra package) | `/usr/local/cuda-12.6/targets/**aarch64-linux**/lib` |
+| Separately installed CUDA 12.8 (**SBSA package**) | `/usr/local/cuda-12.8/targets/**sbsa-linux**/lib` |
 
-把 `/usr/local/cuda` 切到 12.8 后，`/etc/apt` 之外还有一处遗留：`/etc/ld.so.conf.d/000_cuda.conf`（文件名前缀 000，扫描优先级最高）写的是 `/usr/local/cuda/targets/aarch64-linux/lib` —— 这个目录在 12.8 下**不存在**了，而 ld 缓存是在切换前生成的，于是缓存里 `libcudart.so.12` 仍指向一条**悬空路径**，`dlopen` 必然失败。
+After switching `/usr/local/cuda` to 12.8, there's a leftover beyond `/etc/apt`: `/etc/ld.so.conf.d/000_cuda.conf` (the `000` filename prefix gives it top scan priority) still points at `/usr/local/cuda/targets/aarch64-linux/lib` — a directory that **no longer exists** under 12.8. Since the ld cache was generated before the switch, `libcudart.so.12` in the cache still points to a **dangling path**, and `dlopen` is bound to fail.
 
-**先刷新缓存，再看它落到哪个版本：**
+**Refresh the cache first, then see which version it resolves to:**
 
 ```bash
 sudo ldconfig
 ldconfig -p | grep 'libcudart.so.12 '
 ```
 
-在本文的环境里刷新后 soname 落到了 **12.2**（因为 `gds-12-2.conf` 指的目录仍然存在）。**这不够**——
+In this document's environment, after refreshing, the soname landed on **12.2** (because the directory referenced by `gds-12-2.conf` still exists). **That's not enough** —
 
 ```bash
-# 只有 12.8 提供 cuda_blackboard 需要的 cudaStreamGetDevice
+# only 12.8 provides the cudaStreamGetDevice that cuda_blackboard needs
 for v in 12.2/targets/aarch64-linux 12.6/targets/aarch64-linux 12.8/targets/sbsa-linux; do
   printf 'cuda-%-30s ' "$v"
   nm -D --defined-only /usr/local/cuda-$v/lib/libcudart.so.12 \
-    | grep -qw cudaStreamGetDevice && echo 有 || echo 无
+    | grep -qw cudaStreamGetDevice && echo yes || echo no
 done
-# cuda-12.2/...  无
-# cuda-12.6/...  无
-# cuda-12.8/...  有
+# cuda-12.2/...  no
+# cuda-12.6/...  no
+# cuda-12.8/...  yes
 ```
 
-**不要把 12.8 设成全系统默认。** Jetson 应当保留 JetPack 自己的 CUDA 作为系统默认（相机、多媒体、DeepStream 都依赖它）。只给 Autoware 的运行环境加一条路径即可：
+**Do not make 12.8 the system-wide default.** The Jetson should keep JetPack's own CUDA as the system default (camera, multimedia, and DeepStream all depend on it). Just add one path to Autoware's runtime environment:
 
 ```bash
-# 和 source install/setup.bash 放在一起（写进 ~/.bashrc 或启动脚本）
+# place alongside `source install/setup.bash` (add to ~/.bashrc or a launch script)
 export LD_LIBRARY_PATH=/usr/local/cuda-12.8/targets/sbsa-linux/lib:${LD_LIBRARY_PATH}
 ```
 
-**验证判据**（实测 15 → 0）：
+**Verification criterion** (measured: 15 → 0):
 
 ```bash
 ros2 launch autoware_launch logging_simulator.launch.xml \
   map_path:=$HOME/autoware_map/sample-map-rosbag \
   vehicle_model:=sample_vehicle sensor_model:=sample_sensor_kit rviz:=false > launch.log 2>&1
 
-grep -c 'cannot open shared object file' launch.log    # 必须为 0
+grep -c 'cannot open shared object file' launch.log    # must be 0
 ```
 
-### 步骤 8：配置 DDS（`setup-dev-env.sh` **不会**替你做）
+### Step 8: Configure DDS (`setup-dev-env.sh` **will not** do this for you)
 
-Autoware 一次启动 **140 个节点**，点云单帧数 MB，全部走 UDP 回环。Ubuntu 默认的接收缓冲只有 208 KB，必然丢包——而 `setup-dev-env.sh` 不会落任何 DDS 相关的 sysctl 配置（`/etc/sysctl.d/` 里查不到 `rmem_max`）。
+A single Autoware launch brings up **140 nodes**, with each point cloud frame several MB, all traveling over the UDP loopback. Ubuntu's default receive buffer is only 208 KB, so packet loss is inevitable — and `setup-dev-env.sh` never lays down any DDS-related sysctl settings (`rmem_max` is nowhere to be found under `/etc/sysctl.d/`).
 
-症状非常有迷惑性，因为它**不报错、只是丢数据**，而且丢得不均匀：
+The symptom is very misleading, because it **produces no errors, it just silently drops data** — and unevenly at that:
 
 ```
-# 同一个 bag 里三路雷达，同一测量窗口
-/sensing/lidar/right/velodyne_packets   5.972       ← 有
-/sensing/lidar/top/velodyne_packets     无数据      ← 主雷达，没有
-/sensing/lidar/left/velodyne_packets    无数据
+# Same bag, three lidars, same measurement window
+/sensing/lidar/right/velodyne_packets   5.972       ← has data
+/sensing/lidar/top/velodyne_packets     no data      ← main lidar, missing
+/sensing/lidar/left/velodyne_packets    no data
 
-# 于是下游连环报超时
+# downstream then reports a cascade of timeouts
 [ERROR] [localization.twist_estimator.gyro_odometer]: IMU msg is timeout.
 [ERROR] [localization.twist_estimator.gyro_odometer]: Vehicle twist msg is timeout.
 ```
 
-很容易被误判成"编译出来的包有问题"或"传感器配置对不上"。**先查缓冲区，再怀疑代码。**
+It's easy to misdiagnose this as "the compiled packages are broken" or "the sensor configuration doesn't match." **Check the buffer size before you suspect the code.**
 
 ```bash
-sysctl -n net.core.rmem_max      # 默认 212992 —— 远远不够
+sysctl -n net.core.rmem_max      # default 212992 -- nowhere near enough
 ```
 
-**处置**（官方要求值）：
+**Fix** (the officially required values):
 
 ```bash
 sudo tee /etc/sysctl.d/60-autoware-dds.conf >/dev/null <<'EOF'
@@ -321,87 +321,87 @@ EOF
 sudo sysctl --system
 ```
 
-**RMW 保持默认的 FastDDS。** 网上常见的建议是「换 CycloneDDS」，本环境实测**不要照抄**：写一份把 `<Interfaces>` 限定到 `lo`、带 `SocketReceiveBufferSize min="10MB"` 的 `cyclonedds.xml` 并设 `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` 之后，**几乎所有节点在初始化阶段就 SIGABRT**：
+**Keep the default RMW, FastDDS.** A common suggestion online is to "switch to CycloneDDS" — testing in this environment shows **don't just copy that advice**: after writing a `cyclonedds.xml` that restricts `<Interfaces>` to `lo` and sets `SocketReceiveBufferSize min="10MB"`, then setting `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`, **almost every node SIGABRTs during initialization**:
 
 ```
 [ERROR] [autoware_ndt_scan_matcher_node-26]: process has died [pid ..., exit code -6, ...]
 [ERROR] [autoware_ekf_localizer_node-30]:   process has died [pid ..., exit code -6, ...]
 [ERROR] [imu_corrector_node-22]:            process has died [pid ..., exit code -6, ...]
-（十余个节点同样 exit code -6）
+(a dozen-plus other nodes fail the same way with exit code -6)
 ```
 
-回退到 FastDDS 即恢复正常。换 RMW 属于独立的调优议题，**要单独验证，不要和本 SOP 的步骤混在一起做**——否则 SIGABRT 会被误记到编译产物上。真正解决丢数据的是上面那四个 sysctl。
+Reverting to FastDDS restores normal operation. Switching RMW is a separate tuning topic — **verify it independently, don't mix it into this SOP's steps** — otherwise the SIGABRTs get wrongly blamed on the build artifacts. What actually fixes the data loss is the four sysctl settings above.
 
-> **诊断时顺手关掉 ros2 CLI 守护进程。** `ros2 topic hz` / `node list` 默认经由 `ros2-daemon`，它会缓存拓扑图；上一次启动残留的守护进程会让你在新的一轮里看到过期的图，表现为"话题明明在发但 hz 找不到"。测量时一律加 `--no-daemon`，或先按 PID 停掉守护进程。
+> **While diagnosing, also shut down the ros2 CLI daemon.** `ros2 topic hz` / `node list` go through `ros2-daemon` by default, which caches the topology graph; a daemon left over from a previous launch will show you a stale graph in the new run, manifesting as "the topic is clearly publishing but hz can't find it." Always add `--no-daemon` when measuring, or stop the daemon by PID first.
 
-### 步骤 9：功能验证结果（实测 A/B）
+### Step 9: Functional Verification Results (measured A/B)
 
-用 `logging_simulator` + 官方 `sample-map-rosbag` / `sample-rosbag`，**单次回放**（不用 `--loop`）：
+Using `logging_simulator` + the official `sample-map-rosbag` / `sample-rosbag`, **a single playback** (without `--loop`):
 
 ```bash
 ros2 launch autoware_launch logging_simulator.launch.xml \
   map_path:=$HOME/autoware_map/sample-map-rosbag \
   vehicle_model:=sample_vehicle sensor_model:=sample_sensor_kit rviz:=false > launch.log 2>&1 &
-# 等日志里 "Loaded node" 计数 > 95（比 ros2 node list 可靠）
+# wait for the "Loaded node" count in the log to exceed 95 (more reliable than ros2 node list)
 ros2 bag play $HOME/autoware_map/sample-rosbag --clock -r 0.5
 ```
 
-| 判据 | 修复前 | 修复后 |
+| Criterion | Before fix | After fix |
 |---|---|---|
-| 组件节点加载（`grep -c 'Loaded node'`） | 97 | **97** |
-| `dlopen` 失败（步骤 7 之前） | **15** | **0** |
-| 进程死亡（`cuda_blackboard` 补丁之前） | **1**（每轮都是 `pointcloud_container`） | **0** |
+| Component nodes loaded (`grep -c 'Loaded node'`) | 97 | **97** |
+| `dlopen` failures (before Step 7) | **15** | **0** |
+| Process deaths (before the `cuda_blackboard` patch) | **1** (always `pointcloud_container`, every run) | **0** |
 | `cudaError` | 1 | **0** |
-| `msg is timeout`（sysctl 调优前后） | 38 | 22 → 28 |
-| `No InputSource`（雷达输入缺失） | 10 | **1** |
+| `msg is timeout` (before/after sysctl tuning) | 38 | 22 → 28 |
+| `No InputSource` (missing lidar input) | 10 | **1** |
 
-补丁生效后，告警本身就是链路在工作的证据：
+Once the patch takes effect, the warnings themselves become evidence that the pipeline is working:
 
 ```
-352  [lidar_centerpoint]: Fail to preprocess and skip to detect          ← CenterPoint 在收点云做推理
+352  [lidar_centerpoint]: Fail to preprocess and skip to detect          ← CenterPoint is receiving point clouds and running inference
 331  [sensing.lidar.concatenate_data]: transformed_raw_points[.../top/...]
-173  [sensing.lidar.concatenate_data]: transformed_raw_points[.../left/...]    ← 三路雷达全部到达
+173  [sensing.lidar.concatenate_data]: transformed_raw_points[.../left/...]    ← all three lidars are arriving
 134  [sensing.lidar.concatenate_data]: transformed_raw_points[.../right/...]
 166  [lidar_centerpoint]: Could not find a connection between 'base_link' and 'map'
 ```
 
-最后那条是**预期状态**：`map → base_link` 只有在定位初始化成功后才存在。
+That last line is **expected**: `map → base_link` only exists once localization initialization succeeds.
 
-**尚未跑通的一段**：完整的 NDT 收敛与规划闭环。原因有两个，都不在构建侧——① 无头环境下 GNSS 自动初始化返回 `The GNSS pose is out of dimension`/`align server failed`；② 官方 sample-rosbag 自身时间戳不一致导致 TF 缓冲反复清空（见坑 #12）。要跑通建议开 RViz 手动给初始位姿，或改用自采数据。
+**What hasn't been made to work yet**: the full NDT convergence and planning closed loop. There are two reasons, neither on the build side — ① in a headless environment, automatic GNSS initialization returns `The GNSS pose is out of dimension` / `align server failed`; ② the official sample-rosbag has internally inconsistent timestamps that repeatedly clear the TF buffer (see Pitfall #12). To get it working, open RViz and set the initial pose manually, or switch to your own recorded data.
 
-### 步骤 10：单独验证感知（CenterPoint）—— 用静态 TF 把它从定位里隔离出来
+### Step 10: Verify Perception (CenterPoint) in isolation — use a static TF to decouple it from localization
 
-定位没初始化时，`map → base_link` 不存在，CenterPoint 会刷 `Fail to preprocess and skip to detect`，看起来像感知坏了。**实际上只是缺 TF。**补一个静态变换即可单独验证感知：
+When localization hasn't initialized, `map → base_link` doesn't exist, and CenterPoint keeps logging `Fail to preprocess and skip to detect`, which looks like perception is broken. **In reality it's just a missing TF.** Publishing one static transform is enough to verify perception on its own:
 
 ```bash
-# 在 logging_simulator 起来之后、回放 rosbag 之前
+# after logging_simulator is up, before playing back the rosbag
 ros2 run tf2_ros static_transform_publisher --x 0 --y 0 --z 0 \
   --qx 0 --qy 0 --qz 0 --qw 1 --frame-id map --child-frame-id base_link \
   --ros-args -p use_sim_time:=true &
 ```
 
-静态 TF 在 TF2 里是「永远有效」的，所以不受样例包时间戳问题影响。
+A static TF is "always valid" in TF2, so it's unaffected by the sample bag's timestamp issue.
 
-**实测结果**（三轮独立测试，Orin AGX 64GB，`centerpoint_tiny`）：
+**Measured results** (three independent runs, Orin AGX 64GB, `centerpoint_tiny`):
 
-| 判据 | 无静态 TF | 有静态 TF |
+| Criterion | Without static TF | With static TF |
 |---|---|---|
 | `Could not find a connection between 'base_link' and 'map'` | 166 | **0** |
 | `Fail to preprocess and skip to detect` | 352 | 139 |
-| `/perception/object_recognition/detection/centerpoint/objects` 消息数 | **0** | **105 / 135 / 127**（三轮） |
-| 累计检测目标 | 0 | 104 / 184 / **202** |
+| `/perception/object_recognition/detection/centerpoint/objects` message count | **0** | **105 / 135 / 127** (three runs) |
+| Cumulative detected objects | 0 | 104 / 184 / **202** |
 
-**推理性能**（`.../lidar_centerpoint/debug/processing_time_ms`，n=128）：
+**Inference performance** (`.../lidar_centerpoint/debug/processing_time_ms`, n=128):
 
 ```
-min = 18.4 ms    中位 = 26.4 ms    p95 = 36.8 ms    max = 306.9 ms（首帧 TRT 预热）
-→ 计算侧等效上限 ≈ 37.9 Hz
-实际发布周期 中位 = 142.8 ms（7.0 Hz）—— 受输入点云速率限制（bag 以 -r 0.5 回放），不是算力瓶颈
+min = 18.4 ms    median = 26.4 ms    p95 = 36.8 ms    max = 306.9 ms (first-frame TRT warm-up)
+→ compute-side equivalent ceiling ≈ 37.9 Hz
+actual publish period median = 142.8 ms (7.0 Hz) — limited by the input point cloud rate (bag replayed at -r 0.5), not a compute bottleneck
 ```
 
-26 ms 的中位推理耗时对 10 Hz 激光雷达有充足余量。
+A median inference time of 26 ms leaves ample headroom for a 10 Hz lidar.
 
-**TensorRT 引擎是现场构建的**，可用文件时间戳核对（这是最硬的验证——它同时考验 CUDA 12.8 产物、TRT 10.3、ONNX 解析器与 SM 87 kernel 选择）：
+**The TensorRT engine is built on the spot**; this can be confirmed with file timestamps (this is the strongest verification — it simultaneously exercises the CUDA 12.8 build artifacts, TRT 10.3, the ONNX parser, and SM 87 kernel selection):
 
 ```bash
 find ~/autoware_data -name '*.engine' -printf '%TY-%Tm-%Td %TH:%TM  %s  %f\n' | sort
@@ -409,81 +409,81 @@ find ~/autoware_data -name '*.engine' -printf '%TY-%Tm-%Td %TH:%TM  %s  %f\n' | 
 # ml_models/lidar_centerpoint/pts_backbone_neck_head_centerpoint_tiny.engine  10.4 MB
 ```
 
-> **依赖提示**：`libautoware_lidar_centerpoint_component.so` 直接 `NEEDED libcuda_blackboard.so` —— 所以第 5 节那个一行补丁不打，CenterPoint 会随 `pointcloud_container` 一起崩掉。
-> 反过来，`autoware_tensorrt_plugins`（spconv 缺失，坑 #8）**不影响 CenterPoint**，只影响 `autoware_bevfusion` / `autoware_ptv3` / `autoware_tensorrt_vad` / `autoware_diffusion_planner` 这四个包。
+> **Dependency note**: `libautoware_lidar_centerpoint_component.so` has a direct `NEEDED libcuda_blackboard.so` — so without the one-line patch in Section 5, CenterPoint crashes along with `pointcloud_container`.
+> Conversely, `autoware_tensorrt_plugins` (missing spconv, Pitfall #8) **does not affect CenterPoint**; it only affects the four packages `autoware_bevfusion` / `autoware_ptv3` / `autoware_tensorrt_vad` / `autoware_diffusion_planner`.
 
-**调试话题的消息类型**：`processing_time_ms` / `cyclic_time_ms` 用的是 `autoware_internal_debug_msgs/msg/Float64Stamped`（1.9.0 已从旧的 `tier4_debug_msgs` 迁移，源码里 234 处用新包、仅 1 处用旧包）。用错类型订阅不会报错，只是永远收不到消息。
+**Message type for the debug topics**: `processing_time_ms` / `cyclic_time_ms` use `autoware_internal_debug_msgs/msg/Float64Stamped` (1.9.0 has migrated off the old `tier4_debug_msgs`; the source has 234 references to the new package versus only 1 to the old one). Subscribing with the wrong type doesn't raise an error — you simply never receive any messages.
 
-> **测量方法上的一条教训**：不要用 `ros2 topic hz` 从图外探测。140 个节点的满载 Orin 上，新建 DDS participant 完成发现要几十秒，超时先到，于是"明明在发的话题"全显示无数据——三路雷达只有一路有数据这种自相矛盾的结果就是这么来的。**用图内证据**：读启动日志里各节点自己的告警、`topic_state_monitor` 的判定、`process has died` 计数。
+> **One lesson about measurement methodology**: don't probe from outside the graph with `ros2 topic hz`. On a fully-loaded Orin with 140 nodes, a newly created DDS participant can take tens of seconds to complete discovery, and the timeout fires first — so topics that are clearly publishing all show up as having no data. That's exactly how you get the self-contradictory result of "only one of three lidars has data." **Use in-graph evidence instead**: each node's own warnings in the startup log, `topic_state_monitor`'s verdicts, and the `process has died` count.
 
-### 反复测试时必须确认"只有一个实例在跑"
+### When re-testing repeatedly, always confirm "only one instance is running"
 
-`ros2 launch` 把节点作为**孙进程**启动，脚本里常见的 `trap 'kill $(jobs -p)'` 只杀直接子进程，**节点会活下来**。反复测几轮之后就会积累出多个同名节点同时订阅同一话题、往同一话题发布。
+`ros2 launch` starts nodes as **grandchild processes**; the common `trap 'kill $(jobs -p)'` pattern in scripts only kills direct children, so **the nodes survive**. After several rounds of repeated testing, you end up accumulating multiple identically-named nodes simultaneously subscribing to and publishing on the same topic.
 
-实测后果（本文环境累积了 **6 个** `lidar_centerpoint` 实例，最老的存活 5896 秒）：
+Observed consequences (in this document's environment, **6** `lidar_centerpoint` instances accumulated, the oldest having survived 5896 seconds):
 
-| 被污染的指标 | 表现 |
+| Metric affected | Symptom |
 |---|---|
-| 处理帧数 | 27018 帧 vs 数据实际只有 9047 帧，**虚高 3 倍** |
-| 检出计数 | 同一目标被多个实例重复上报 |
-| 推理耗时 | 多实例抢 GPU，测出来的延迟不可用 |
+| Frames processed | 27018 frames vs. the data actually containing only 9047 frames — **inflated 3x** |
+| Detection count | The same object reported redundantly by multiple instances |
+| Inference latency | Multiple instances contend for the GPU, making the measured latency meaningless |
 
-**排查**：按 `comm` 过滤会漏——节点的 `comm` 被截断成 `autoware_lidar_`，不匹配 `ros2` / `python3` 这类模式。要按**完整命令行**查：
+**Diagnosis**: filtering by `comm` misses these — a node's `comm` gets truncated to `autoware_lidar_`, which doesn't match patterns like `ros2` / `python3`. Check the **full command line** instead:
 
 ```bash
 ps -eo pid,etimes,args | grep -iE 'centerpoint|robot_state_publisher|static_transform|bag play' | grep -v '[g]rep'
 ```
 
-**根治**：测试脚本用 `setsid` 启动（脚本即成为进程组长），trap 里杀整个进程组：
+**Root fix**: launch the test script with `setsid` (making the script itself the process group leader), and kill the entire process group in the trap:
 
 ```bash
 trap 'kill -- -$$ 2>/dev/null' EXIT INT TERM
 ```
 
-> 顺带一条：`kill` 那一行里**不要出现目标进程名的任何完整字面**。`pgrep -f <name>` 会把执行这条命令的 shell 自己也匹配进去，导致自杀断连。按 PID 杀最安全：先用一条只读命令列出 PID，再用另一条只含数字的命令执行 kill。
+> One more thing in passing: the `kill` line **must not contain any full literal occurrence of the target process's name**. `pgrep -f <name>` will match the very shell executing that command too, causing a self-inflicted disconnect. Killing by PID is safest: first list the PIDs with a read-only command, then run a separate command containing only numbers to do the kill.
 
 ---
 
-## 4. 踩过的坑
+## 4. Pitfalls Encountered
 
-| # | 症状 | 根因 | 处置 |
+| # | Symptom | Root cause | Fix |
 |---|---|---|---|
-| 1 | colcon 33 秒即退出，0 包被编译，`Duplicate package names not supported` | 工作区内留了旧检出（`src.bak` 之类），同名包出现两次 | 旧检出移出工作区，或放 `COLCON_IGNORE` |
-| 2 | `autoware_motion_utils` 失败：`'<anonymous>' may be used uninitialized [-Werror=maybe-uninitialized]` 指向 `return {};` | 系统默认 `gcc` 被 `update-alternatives` 锁在 9.5（常见于为旧 CUDA 迁就的历史配置）；GCC 9 对 `std::optional` 的已知误报 + Autoware 的 `-Werror` | 切 GCC 11（步骤 1）。CMake 3.22 无法用 `CMAKE_COMPILE_WARNING_AS_ERROR` 绕过 |
-| 3 | `autoware_pointcloud_preprocessor` / `cuda_blackboard` / `autoware_grid_map_utils` 配置阶段失败：`Could NOT find CUDA: Found unsuitable version "12.6", but required is exact version "12.2"` | 本地编译安装的 OpenCV 在 `OpenCVConfig.cmake` 里写死 `set(OpenCV_CUDA_VERSION "12.2")` 且 `find_host_package(CUDA ... EXACT REQUIRED)`，经 `cv_bridge` 传导到所有用 OpenCV 的包 | 见第 5 节"已知约束" |
-| 4 | `cuda_blackboard` 编译失败：`'cudaStreamGetDevice' was not declared in this scope` | Autoware 1.9.0 钉 `cuda_blackboard` 0.4.0，其使用的 API 属 CUDA ≥12.8；JetPack 6.x 只给 12.6 | 装 CUDA 12.8 工具链（步骤 2） |
-| 5 | `/usr/local/cuda` 已是 12.8，却仍报 `Found unsuitable version "12.6"` | 该包的 `CMakeCache.txt` 是旧环境下生成的 | `rm -rf build install log` 后重编 |
-| 6 | `setup-dev-env.sh` 在 agnocast 角色失败：`gpg: WARNING: unsafe ownership on homedir '/home/lz/.gnupg'` | `~/.gnupg` 属主是 root（历史上某次 `sudo` 带着 `HOME` 跑过 gpg 留下的） | `sudo chown -R $USER:$USER ~/.gnupg && chmod 700 ~/.gnupg` |
-| 7 | 488 包全部编译成功，但启动时 15 个 CUDA 节点报 `dlopen error: libcudart.so.12: cannot open shared object file` | `/usr/local/cuda` 切到 12.8（**SBSA 布局** `targets/sbsa-linux/`）后没刷新 ld 缓存，而 `/etc/ld.so.conf.d/000_cuda.conf` 指的是 Tegra 布局 `targets/aarch64-linux/`，缓存里 soname 落在悬空路径上 | `sudo ldconfig` + 给 Autoware 运行环境加 `LD_LIBRARY_PATH=/usr/local/cuda-12.8/targets/sbsa-linux/lib`（步骤 7）。**不要**把 12.8 设成全系统默认 |
-| 8 | `source install/setup.bash` 报 `not found: ".../autoware_tensorrt_plugins/share/autoware_tensorrt_plugins/local_setup.bash"` | 该包在 `find_package(spconv)` 失败后 `return()`，没走到 `ament_package()`，所以没生成 `local_setup.bash`（2.6 秒"编完"）。`cumm`/`spconv` 不在 1.9.0 的 repos 里 | 仅影响 bevfusion/transfusion 这类稀疏卷积模型；centerpoint 等不受影响。该告警可忽略，或按需另行引入 spconv |
-| 9 | 不报错，但部分话题**静默无数据**且分布不均（三路雷达只有一路有），下游 `gyro_odometer: IMU msg is timeout` 连环报超时 | `net.core.rmem_max` 还是 Ubuntu 默认的 208 KB，140 个节点 + 多 MB 点云走 UDP 回环直接溢出。`setup-dev-env.sh` 不落 DDS sysctl 配置 | 按步骤 8 调 sysctl。**先查缓冲区再怀疑代码** |
-| 11 | 编译 488/488 全过，但启动后恰好死 1 个进程（`pointcloud_container`），`ndt_scan_matcher` 报 `No InputSource`，定位初始化报 `align server failed` | `cuda_blackboard` 用了 `cudaStreamGetDevice`，该 API 需要 **CUDA 12.8 驱动**，JetPack 6.x 只有 12.6 → `cudaErrorCallRequiresNewerDriver (36)` → 容器构造函数抛异常 abort | 第 5 节的一行补丁（换成 `cudaGetDevice`）+ 重编 `cuda_blackboard` |
-| 12 | 全图刷 `tf2_buffer: Detected jump back in time. Clearing TF buffer.`（单次回放 5.5 万次，`--loop` 下 27 万次） | **官方 `sample-rosbag` 自身时间戳不一致**：包内传感器时间戳是 `1585897272`（2020-04-03），而 bag 消息时间戳是 `1614315746`（2021-02-26），TF 缓冲反复被清空。`--loop` 会让 `/clock` 额外回退，雪上加霜 | 与本次构建无关。功能验证至少别用 `--loop`；要跑通完整定位建议改用自采数据，或按官方教程开 RViz 手动给初始位姿 |
-| 13 | 换 CycloneDDS 后 60+ 个节点 `exit code -6` | 自写的 `cyclonedds.xml`（限定 `lo` 接口 + `SocketReceiveBufferSize`）在本环境导致初始化 abort | 回退 FastDDS（步骤 8） |
-| 10 | 话题明明在发，`ros2 topic hz` 却说找不到 | `ros2-daemon` 缓存了上一轮启动的拓扑图 | 测量加 `--no-daemon`，或按 PID 停掉守护进程 |
+| 1 | colcon exits after 33 seconds, 0 packages built, `Duplicate package names not supported` | An old checkout (e.g. `src.bak`) was left inside the workspace, causing the same package names to appear twice | Move the old checkout out of the workspace, or drop a `COLCON_IGNORE` file in it |
+| 2 | `autoware_motion_utils` fails: `'<anonymous>' may be used uninitialized [-Werror=maybe-uninitialized]` pointing at `return {};` | The system default `gcc` was pinned to 9.5 via `update-alternatives` (commonly a legacy setting kept around to accommodate an older CUDA); a known GCC 9 false positive on `std::optional` combined with Autoware's `-Werror` | Switch to GCC 11 (Step 1). CMake 3.22 can't be worked around with `CMAKE_COMPILE_WARNING_AS_ERROR` |
+| 3 | `autoware_pointcloud_preprocessor` / `cuda_blackboard` / `autoware_grid_map_utils` fail at the configure stage: `Could NOT find CUDA: Found unsuitable version "12.6", but required is exact version "12.2"` | The locally-built OpenCV hardcodes `set(OpenCV_CUDA_VERSION "12.2")` in `OpenCVConfig.cmake` with `find_host_package(CUDA ... EXACT REQUIRED)`, propagated through `cv_bridge` to every package that uses OpenCV | See "Known Constraints" in Section 5 |
+| 4 | `cuda_blackboard` fails to build: `'cudaStreamGetDevice' was not declared in this scope` | Autoware 1.9.0 pins `cuda_blackboard` 0.4.0, which uses an API that requires CUDA ≥12.8; JetPack 6.x only provides 12.6 | Install the CUDA 12.8 toolchain (Step 2) |
+| 5 | `/usr/local/cuda` is already 12.8, yet it still reports `Found unsuitable version "12.6"` | That package's `CMakeCache.txt` was generated under the old environment | `rm -rf build install log`, then rebuild |
+| 6 | `setup-dev-env.sh` fails in the agnocast role: `gpg: WARNING: unsafe ownership on homedir '/home/lz/.gnupg'` | `~/.gnupg` is owned by root (left over from some earlier `sudo` invocation that ran gpg while carrying `HOME` along) | `sudo chown -R $USER:$USER ~/.gnupg && chmod 700 ~/.gnupg` |
+| 7 | All 488 packages build successfully, but 15 CUDA nodes report `dlopen error: libcudart.so.12: cannot open shared object file` at startup | After switching `/usr/local/cuda` to 12.8 (**SBSA layout** `targets/sbsa-linux/`), the ld cache wasn't refreshed, and `/etc/ld.so.conf.d/000_cuda.conf` still points at the Tegra layout `targets/aarch64-linux/`, so the soname in the cache lands on a dangling path | `sudo ldconfig` + add `LD_LIBRARY_PATH=/usr/local/cuda-12.8/targets/sbsa-linux/lib` to Autoware's runtime environment (Step 7). **Do not** make 12.8 the system-wide default |
+| 8 | `source install/setup.bash` reports `not found: ".../autoware_tensorrt_plugins/share/autoware_tensorrt_plugins/local_setup.bash"` | This package calls `return()` after `find_package(spconv)` fails, never reaching `ament_package()`, so `local_setup.bash` is never generated (it "finishes" in 2.6 seconds). `cumm`/`spconv` are not in 1.9.0's repos list | Only affects sparse-convolution models like bevfusion/transfusion; centerpoint and others are unaffected. This warning can be ignored, or spconv can be pulled in separately if needed |
+| 9 | No errors, but some topics **silently have no data**, unevenly distributed (only one of three lidars has data); downstream `gyro_odometer: IMU msg is timeout` cascades into a wave of timeouts | `net.core.rmem_max` is still Ubuntu's default 208 KB; 140 nodes plus multi-MB point clouds over the UDP loopback overflow it outright. `setup-dev-env.sh` doesn't lay down the DDS sysctl settings | Tune sysctl per Step 8. **Check the buffer before suspecting the code** |
+| 11 | All 488/488 packages build, but exactly 1 process dies at startup (`pointcloud_container`); `ndt_scan_matcher` reports `No InputSource`, and localization initialization reports `align server failed` | `cuda_blackboard` uses `cudaStreamGetDevice`, which requires a **CUDA 12.8 driver**; JetPack 6.x only has 12.6 → `cudaErrorCallRequiresNewerDriver (36)` → the container's constructor throws and aborts | The one-line patch in Section 5 (switch to `cudaGetDevice`) + rebuild `cuda_blackboard` |
+| 12 | `tf2_buffer: Detected jump back in time. Clearing TF buffer.` floods the entire graph (55k times for a single playback, 270k times with `--loop`) | **The official `sample-rosbag` has internally inconsistent timestamps**: the sensor timestamps inside the bag read `1585897272` (2020-04-03), while the bag's message timestamps read `1614315746` (2021-02-26), repeatedly clearing the TF buffer. `--loop` makes `/clock` jump backward on top of that, making it worse | Unrelated to this build. At minimum, avoid `--loop` for functional verification; to get full localization working, switch to your own recorded data, or follow the official tutorial and set the initial pose manually in RViz |
+| 13 | After switching to CycloneDDS, 60+ nodes exit with `exit code -6` | A custom `cyclonedds.xml` (restricting to the `lo` interface + `SocketReceiveBufferSize`) causes initialization to abort in this environment | Revert to FastDDS (Step 8) |
+| 10 | The topic is clearly publishing, yet `ros2 topic hz` says it can't be found | `ros2-daemon` cached the topology graph from a previous launch | Add `--no-daemon` when measuring, or stop the daemon by PID |
 
-### 关于诊断方法的两条经验
+### Two Lessons on Diagnostic Method
 
-**日志里的"任务标题"不是执行证据。** ansible 对跳过的任务同样打印 `TASK [... : Install cuda-drivers]`，紧随其后的 `skipping:` 才是结论。据标题判断会导致误停健康的流程。
+**A "task header" in the log is not evidence of execution.** ansible prints `TASK [... : Install cuda-drivers]` for skipped tasks too; the `skipping:` line right after it is what actually tells you the outcome. Judging by the header alone leads to wrongly halting a healthy process.
 
-**结论要按结果验证，不按过程推测。** 判断系统是否被改动，靠的是 `dpkg -l` / `readlink -f` / `apt-mark showhold` / `opencv_version --verbose` 这类查询当前状态的命令，而不是"日志里没看到某行"。
+**Verify conclusions against outcomes, not by inferring from the process.** Whether a system has actually been changed should be determined with state-querying commands like `dpkg -l` / `readlink -f` / `apt-mark showhold` / `opencv_version --verbose`, not by "I didn't see that line in the log."
 
 ---
 
-## 5. 已知约束
+## 5. Known Constraints
 
-### OpenCV 4.8.0 无法用 nvcc 12.8 编译
+### OpenCV 4.8.0 cannot be built with nvcc 12.8
 
-直觉上应该让 OpenCV 与 Autoware 使用同一个 CUDA 版本。实测**做不到**：用 CUDA 12.8 重编 OpenCV 4.8.0 会在 `cudaarithm` / `cudawarping` 阶段失败，
+Intuitively, OpenCV and Autoware should use the same CUDA version. In practice, **this doesn't work**: rebuilding OpenCV 4.8.0 with CUDA 12.8 fails at the `cudaarithm` / `cudawarping` stage,
 
 ```
 opencv_contrib/modules/cudev/include/opencv2/cudev/grid/detail/reduce.hpp(379):
   error: no instance of overloaded function "cv::cudev::blockReduce" matches the argument list
 ```
 
-这是 OpenCV 4.8 `cudev` 模块与较新 nvcc 的上游不兼容（4.9/4.10 才修），也正是既有 SOP 用 CUDA 12.2 构建 OpenCV 的原因。
+This is an upstream incompatibility between OpenCV 4.8's `cudev` module and newer nvcc versions (fixed only in 4.9/4.10), and is exactly why the existing SOP builds OpenCV against CUDA 12.2.
 
-**当前采用的做法**（可用但非终态）：保留按 CUDA 12.2 构建的 OpenCV，仅放宽其 CMake 版本断言，使 Autoware 能够配置通过。
+**Current approach** (workable but not the final state): keep the OpenCV build against CUDA 12.2, and merely relax its CMake version assertion so that Autoware can configure successfully.
 
 ```bash
 C=/usr/lib/aarch64-linux-gnu/cmake/opencv4/OpenCVConfig.cmake
@@ -491,58 +491,58 @@ sudo cp -n $C $C.bak-cuda122
 sudo sed -i 's/set(OpenCV_CUDA_VERSION "12.2")/set(OpenCV_CUDA_VERSION "12.8")/' $C
 ```
 
-**这个改动没有运行时后果**，因为 Autoware 根本不碰 OpenCV 的 GPU 代码。实测依据（2026-09-22，Orin 上验证）：
+**This change has no runtime consequences**, because Autoware never touches OpenCV's GPU code at all. Supporting evidence (verified on Orin, 2026-09-22):
 
-| 检查项 | 命令 | 结果 |
+| Check | Command | Result |
 |---|---|---|
-| 源码 include CUDA 模块 | `grep -rl 'opencv2/cuda' src` | **0** |
-| 源码调用 `cv::cuda::` | `grep -rl 'cv::cuda::' src` | **0** |
-| CMakeLists 请求 cuda 组件 | `grep -rniE 'cuda(arithm\|warping\|...)' --include=CMakeLists.txt` | **0** |
-| 产物依赖 `libopencv_cuda*` | `objdump -p $(readlink -f *.so) \| grep NEEDED` | **0** |
-| 产物实际依赖的 OpenCV 模块 | 同上 | 仅 `core/imgproc/imgcodecs/calib3d/highgui/dnn/photo/ximgproc`（39 个库，全 CPU 侧） |
+| Source includes a CUDA module | `grep -rl 'opencv2/cuda' src` | **0** |
+| Source calls `cv::cuda::` | `grep -rl 'cv::cuda::' src` | **0** |
+| CMakeLists requests a cuda component | `grep -rniE 'cuda(arithm\|warping\|...)' --include=CMakeLists.txt` | **0** |
+| Build artifacts depend on `libopencv_cuda*` | `objdump -p $(readlink -f *.so) \| grep NEEDED` | **0** |
+| OpenCV modules actually depended on by the build artifacts | same as above | only `core/imgproc/imgcodecs/calib3d/highgui/dnn/photo/ximgproc` (39 libraries, all CPU-side) |
 
-Autoware 的 GPU 推理走 TensorRT + 自写 CUDA kernel，OpenCV 在它这里**是当纯 CPU 图像库用的**。那 10 个 `libopencv_cuda*.so.408` 没有任何调用方。
+Autoware's GPU inference goes through TensorRT plus hand-written CUDA kernels; here OpenCV **is used purely as a CPU-side image library**. Those 10 `libopencv_cuda*.so.408` libraries have no callers at all.
 
-另外本地这套 OpenCV 用的是 OpenCV 默认的 `CUDA_USE_STATIC_CUDA_RUNTIME=ON`：
+Also, this local OpenCV build uses OpenCV's default `CUDA_USE_STATIC_CUDA_RUNTIME=ON`:
 
 ```
 Extra dependencies: ... cudart_static ... -L/usr/local/cuda-12.2/lib64
 ```
 
-CUDA 12.2 的 runtime 是**静态**链进去的，68 个 `.so` 没有一个 `NEEDED libcudart` —— 所以既不存在 soname 冲突，那份静态 runtime 也永远不会被初始化。`OpenCV_CUDA_VERSION` 在这里纯粹是一个**编译期断言**。
+The CUDA 12.2 runtime is linked in **statically** — not one of the 68 `.so` files has `NEEDED libcudart` — so there's no soname conflict, and that static runtime is never initialized either. Here `OpenCV_CUDA_VERSION` is purely a **build-time assertion**.
 
-> 早期版本的本文曾写"进程内可能同时存在两个 CUDA 运行时，跨 OpenCV 边界传 `cudaStream_t`/`GpuMat` 需额外验证"。按上表实测，该担心在 Autoware 这条链上不成立，已更正。
+> An earlier version of this document stated that "two CUDA runtimes might coexist within the process, and passing `cudaStream_t`/`GpuMat` across the OpenCV boundary would need extra verification." Based on the measurements in the table above, that concern does not apply to Autoware's pipeline, and this has been corrected.
 
-**要不要升级到 OpenCV 4.9/4.10？为了 Autoware 不需要，且代价很高。** soname 会从 `.408` 变成 `.410`，所有 `NEEDED libopencv_*.so.408` 的二进制当场失效：
+**Should you upgrade to OpenCV 4.9/4.10? Not needed for Autoware, and the cost is high.** The soname would change from `.408` to `.410`, instantly breaking every binary with `NEEDED libopencv_*.so.408`:
 
-| 受影响 | 数量 | 能否重编 |
+| Affected | Count | Can it be rebuilt |
 |---|---|---|
-| Autoware 库 | 39 | 能，2h23min |
-| **GMSL 相机驱动**（`gmsl_node`，`NEEDED libopencv_cudawarping.so.408`） | 1 | 能，但**必须有 OpenCV 的 CUDA 模块** |
-| Metavision SDK 5.1.1（含 Python 扩展） | 4 | **不能，厂商预编译** |
+| Autoware libraries | 39 | Yes, 2h23min |
+| **GMSL camera driver** (`gmsl_node`, `NEEDED libopencv_cudawarping.so.408`) | 1 | Yes, but **requires OpenCV's CUDA module** |
+| Metavision SDK 5.1.1 (including Python extension) | 4 | **No, vendor-prebuilt** |
 
-第三条是硬阻塞（事件相机链路依赖它）。**只有下面两种情况才真的需要 4.10**：
+The third item is a hard blocker (the event-camera pipeline depends on it). **4.10 is only genuinely needed in the following two cases**:
 
-1. 要在 host 上使用 `cv::cuda::` 且必须与 CUDA 12.8 一同编译（4.8 的 `cudev` 过不了 nvcc 12.8）
-2. 要使用 OpenCV DNN 的 CUDA 后端 + cuDNN 9（4.8 只支持 cuDNN 8）
+1. You need to use `cv::cuda::` on the host and it must be built together with CUDA 12.8 (4.8's `cudev` can't get past nvcc 12.8)
+2. You need OpenCV DNN's CUDA backend with cuDNN 9 (4.8 only supports cuDNN 8)
 
-若将来确需 4.10，正确做法是**并存而非替换**：装到 `/opt/opencv-4.10` 独立前缀，用 `OpenCV_DIR` 指给需要它的项目，不触碰 `/usr/lib/aarch64-linux-gnu` 下的 4.8。
+If 4.10 is genuinely needed in the future, the right approach is to **coexist rather than replace**: install it under its own prefix at `/opt/opencv-4.10`, point `OpenCV_DIR` at it for whichever project needs it, and leave the 4.8 install under `/usr/lib/aarch64-linux-gnu` untouched.
 
-### 同机其他项目的兼容性（2026-09-22 实测）
+### Compatibility with Other Projects on the Same Machine (measured 2026-09-22)
 
-同一台 Orin 上还有两个项目用到 OpenCV / CUDA，都在 JP6.2 + CUDA 12.8 下**实测编译通过**：
+Two other projects on the same Orin also use OpenCV / CUDA, and both **build successfully** under JP6.2 + CUDA 12.8:
 
-| 项目 | 对 OpenCV 的依赖 | 对 CUDA 的依赖 | 结果 |
+| Project | OpenCV dependency | CUDA dependency | Result |
 |---|---|---|---|
-| **GMSL_Camera_ROS2** | `find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs cudaimgproc cudawarping)`，源码 `#include <opencv2/cudaimgproc>` / `<opencv2/cudawarping>` | 自有 `.cu`，`enable_language(CUDA)` | `Finished <<< gmsl [25.8s]`，`ldd` 0 未解析 |
-| **Remote_Driving_System_Prod** (dev) 的 `vehicle/camera/gst-nvfisheyeundistort/` | **无** | CUDA kernel + GStreamer + NvBufSurface | `make` 一次过，`gst-inspect-1.0 nvfisheyeundistort` 正常识别 |
+| **GMSL_Camera_ROS2** | `find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs cudaimgproc cudawarping)`, source includes `#include <opencv2/cudaimgproc>` / `<opencv2/cudawarping>` | Its own `.cu` files, `enable_language(CUDA)` | `Finished <<< gmsl [25.8s]`, `ldd` shows 0 unresolved |
+| `vehicle/camera/gst-nvfisheyeundistort/` in **Remote_Driving_System_Prod** (dev) | **None** | CUDA kernel + GStreamer + NvBufSurface | `make` succeeds on the first try, `gst-inspect-1.0 nvfisheyeundistort` recognizes it correctly |
 
-两条要点：
+Two takeaways:
 
-1. **GMSL 驱动是"本地 4.8-CUDA 不可替换"的根据本身**——它的产物直接 `NEEDED libopencv_cudawarping.so.408`。
-2. **前面给 `OpenCVConfig.cmake` 打的 12.8 版本钉，对它同样是必需的**，不只是为了 Autoware：`/usr/local/cuda` 现在指向 12.8，钉子若仍写 12.2，它那句 `find_package(OpenCV REQUIRED COMPONENTS ... cudaimgproc)` 会直接 FATAL_ERROR。两个项目的需求在此**一致，不冲突**。
+1. **The GMSL driver is itself the reason the local 4.8-CUDA build can't be replaced** — its build artifact has a direct `NEEDED libopencv_cudawarping.so.408`.
+2. **The 12.8 version pin applied to `OpenCVConfig.cmake` earlier is required for this project too**, not just for Autoware: `/usr/local/cuda` now points at 12.8, and if the pin still said 12.2, its `find_package(OpenCV REQUIRED COMPONENTS ... cudaimgproc)` line would FATAL_ERROR outright. The two projects' requirements are **aligned here, not in conflict**.
 
-GMSL 唯一需要补的是环境变量（不改代码）——它 `enable_language(CUDA)` 但未指定编译器，裸跑报 `No CMAKE_CUDA_COMPILER could be found`：
+The only thing GMSL needs added is an environment variable (no code changes) — it calls `enable_language(CUDA)` without specifying a compiler, so running it as-is reports `No CMAKE_CUDA_COMPILER could be found`:
 
 ```bash
 export CUDA_HOME=/usr/local/cuda-12.8
@@ -551,11 +551,11 @@ colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.8/bin/nvcc -DCMAKE_CUDA_ARCHITECTURES=87
 ```
 
-鱼眼去畸变插件的 Makefile 一个字都不用改：它引用的 `/usr/local/cuda/include` 与 `/usr/local/cuda/lib64` 这两个兼容符号链接，**CUDA 12.8 的 SBSA 包确实创建了**（分别指向 `targets/sbsa-linux/{include,lib}`）。`nvbufsurface.h` 走它自己的 fallback `/usr/src/jetson_multimedia_api/include`（本机未装 DeepStream，正好命中）。
+The fisheye-undistortion plugin's Makefile doesn't need a single character changed: the two compatibility symlinks it references, `/usr/local/cuda/include` and `/usr/local/cuda/lib64`, **are indeed created by the CUDA 12.8 SBSA package** (pointing at `targets/sbsa-linux/{include,lib}` respectively). `nvbufsurface.h` falls back to its own path, `/usr/src/jetson_multimedia_api/include` (DeepStream isn't installed on this machine, so this fallback is exactly what gets hit).
 
-### `cuda_blackboard` 在 JetPack 上必须打补丁（否则点云链路启动即崩）
+### `cuda_blackboard` must be patched on JetPack (otherwise the point cloud pipeline crashes on startup)
 
-这是本次功能验证挖出来的**最关键问题**，而且它**不会在编译阶段暴露**：488 个包全部编译成功，`ldd` 零未解析依赖，但一启动就有一个进程死亡，每轮都是同一个：
+This is the **most critical issue** uncovered by this round of functional verification, and it **never surfaces at build time**: all 488 packages build successfully, `ldd` shows zero unresolved dependencies, yet one process dies the moment things start — the same one every time:
 
 ```
 [ERROR] [component_container_mt-1]: process has died [exit code -6,
@@ -566,7 +566,7 @@ colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release \
                                       @.../cuda_blackboard/src/cuda_mem_pool_context.cpp#L42
 ```
 
-`pointcloud_container` 托管裁剪、地面分割、占据栅格与点云拼接。它一死，`/sensing/lidar/concatenated/pointcloud` 就不存在，于是：
+`pointcloud_container` hosts cropping, ground segmentation, the occupancy grid, and point cloud concatenation. Once it dies, `/sensing/lidar/concatenated/pointcloud` stops existing, and then:
 
 ```
 [WARN] [localization.pose_estimator.ndt_scan_matcher]: No InputSource. Please check the input lidar topic
@@ -574,11 +574,11 @@ colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release \
 [ERROR] [system.service_log_checker]: /api/localization/initialize: status code 4 'align server failed.'
 ```
 
-——一串看起来像「传感器配置不对」或「地图不对」的下游症状，**根因却是一行 CUDA 调用**。
+— a string of downstream symptoms that look like "wrong sensor configuration" or "wrong map," when **the root cause is actually a single CUDA call**.
 
-**根因**：`cudaStreamGetDevice` 需要 CUDA **12.8 的驱动**，JetPack 6.x 最高只有 12.6 驱动（见第 2 节的实测输出）。装 12.8 工具链解决了编译，但驱动侧没有、也不可能有 12.8（在 Jetson 上装桌面驱动包是禁止的）。
+**Root cause**: `cudaStreamGetDevice` requires a CUDA **12.8 driver**, and JetPack 6.x tops out at a 12.6 driver (see the measured output in Section 2). Installing the 12.8 toolchain solves the build, but there is no 12.8 driver on the driver side — nor can there be one (installing the desktop driver package on a Jetson is off-limits).
 
-**修法**（一行，语义等价）：流就是紧邻两行前在当前设备上创建的，所以 `cudaGetDevice` 拿到的就是同一个 device。
+**Fix** (one line, semantically equivalent): the stream was created on the current device just two lines earlier, so `cudaGetDevice` returns that same device.
 
 ```cpp
 // src/universe/external/cuda_blackboard/src/cuda_mem_pool_context.cpp:42
@@ -589,37 +589,37 @@ colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release \
 ```bash
 cd ~/autoware
 cp -n src/universe/external/cuda_blackboard/src/cuda_mem_pool_context.cpp{,.bak-orig}
-# 改完只需重编这一个包（内部实现变更，ABI 不变，依赖方无需重编）
+# after the edit, only this one package needs rebuilding (internal implementation change, ABI unchanged, dependents don't need rebuilding)
 colcon build --packages-select cuda_blackboard --symlink-install \
   --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=87 \
                -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.8/bin/nvcc
-# 约 3 秒
+# about 3 seconds
 ```
 
-> 这是对 `autoware.repos` 拉下来的**外部依赖**的本地修改，升级 Autoware 版本时会被 `vcs import` 覆盖，需要重新施加。建议在自己的 fork 里维护，或写成 patch 文件纳入部署脚本。
+> This is a local modification to an **external dependency** pulled in via `autoware.repos`; it will be overwritten by `vcs import` the next time you upgrade the Autoware version and will need to be reapplied. Consider maintaining it in your own fork, or turning it into a patch file included in your deployment scripts.
 
-### cv_bridge 与 Autoware 使用不同的 OpenCV（既有状态）
+### cv_bridge and Autoware use different OpenCV builds (pre-existing state)
 
-`/opt/ros/humble/lib/libcv_bridge.so` 链接 apt 的 `libopencv_core.so.4.5d`，而 Autoware 自己的库链接本地编译的 `.408`。两套 soname 会在同一进程内同时加载，ELF 符号解析按加载顺序走全局表。
+`/opt/ros/humble/lib/libcv_bridge.so` links against apt's `libopencv_core.so.4.5d`, while Autoware's own libraries link against the locally-built `.408`. Both sonames end up loaded simultaneously within the same process, and ELF symbol resolution follows the global symbol table in load order.
 
-这是 Jetson 上「apt ROS + 自编译 OpenCV」的既有状态，不是本次构建引入的，**升级到 4.10 也不能解决**（4.10 一样要和 4.5.4d 并存）。当前 488 个包编译链接全部通过、`ldd` 0 个未解析符号，暂不处理，仅记录。要彻底消除只能从源码重编 `cv_bridge` 使其指向同一套 OpenCV。
+This is a pre-existing condition of "apt ROS + self-built OpenCV" on Jetson, not something introduced by this build, and **upgrading to 4.10 wouldn't fix it either** (4.10 would still have to coexist with 4.5.4d). All 488 packages currently build and link successfully with 0 unresolved symbols in `ldd`, so this is left as-is for now and only recorded here. Eliminating it entirely would require rebuilding `cv_bridge` from source so it points at the same OpenCV.
 
-注意系统里可能存在**两份** OpenCV 配置，CMake 优先选架构相关路径：
+Note that the system may have **two** OpenCV configs present, and CMake prefers the architecture-specific path:
 
-| 路径 | 来源 | CUDA |
+| Path | Source | CUDA |
 |---|---|---|
-| `/usr/lib/aarch64-linux-gnu/cmake/opencv4/` | 本地编译安装（`dpkg -S` 查不到归属包） | 有 |
-| `/usr/lib/cmake/opencv4/` | apt `libopencv-dev`（JetPack） | 无 |
+| `/usr/lib/aarch64-linux-gnu/cmake/opencv4/` | Locally built and installed (`dpkg -S` finds no owning package) | Yes |
+| `/usr/lib/cmake/opencv4/` | apt `libopencv-dev` (JetPack) | No |
 
-### cuDNN 8 与 9 并存
+### cuDNN 8 and 9 coexisting
 
-JetPack 6.2 装的是 cuDNN 9.3，但 `libcudnn8` 8.9.4 通常仍在（包名不同，apt 不会替换）。未版本化的 `/usr/include/cudnn_version.h` 经 alternatives 指向 v9。若要为 OpenCV 4.8 启用 DNN-CUDA 后端，需显式指向 v8——但 Autoware 用 TensorRT 推理、不使用 OpenCV 的 DNN 后端，通常可直接 `WITH_CUDNN=OFF`。
+JetPack 6.2 installs cuDNN 9.3, but `libcudnn8` 8.9.4 is typically still present (different package name, so apt won't replace it). The unversioned `/usr/include/cudnn_version.h` is pointed at v9 via alternatives. Enabling OpenCV 4.8's DNN-CUDA backend would require explicitly pointing at v8 — but Autoware performs inference through TensorRT and doesn't use OpenCV's DNN backend, so it's typically fine to just set `WITH_CUDNN=OFF`.
 
-### `autoware_individual_params` 不在 1.9.0 的 repos 清单内 —— 这是正常的，**不要去补**
+### `autoware_individual_params` is not in 1.9.0's repos list — this is expected, **don't try to add it back**
 
-1.9.0 的 `repositories/autoware.repos` 只含 32 个仓库，`ros2 pkg prefix autoware_individual_params` 会报 MISSING。
+1.9.0's `repositories/autoware.repos` contains only 32 repositories; `ros2 pkg prefix autoware_individual_params` will report MISSING.
 
-**这不是缺漏。**该仓库已于 2025 年归档（[autoware#5975](https://github.com/autowarefoundation/autoware/issues/5975)），车辆相关参数已迁入各 sensor kit 自己的 description 包：
+**This is not an omission.** That repository was archived in 2025 ([autoware#5975](https://github.com/autowarefoundation/autoware/issues/5975)), and vehicle-related parameters have moved into each sensor kit's own description package:
 
 ```
 src/launcher/sample_sensor_kit_launch/sample_sensor_kit_description/config/
@@ -628,37 +628,37 @@ src/launcher/sample_sensor_kit_launch/sample_sensor_kit_description/config/
   └── sensors_calibration.yaml
 ```
 
-实测 1.9.0 全部源码中对 `individual_params` 的引用数为 **0**：
+A check across all of 1.9.0's source confirms the reference count for `individual_params` is **0**:
 
 ```bash
 grep -rl 'individual_params' src --include=*.xml --include=*.py --include=*.yaml | wc -l   # 0
 ```
 
-去 clone 那个归档仓库只会在工作区里多出一个无人引用的 `individual_params` 包（注意它的包名没有 `autoware_` 前缀），并且有可能与新位置的参数产生混淆。自定义车型请在自己的 `<vehicle>_sensor_kit_description` 里放标定参数，不要复活 individual_params 这条路径。
+Cloning that archived repository would only add an unreferenced `individual_params` package to the workspace (note its package name has no `autoware_` prefix), and could create confusion with the parameters in their new location. For a custom vehicle, put calibration parameters in your own `<vehicle>_sensor_kit_description`; don't resurrect the individual_params path.
 
 ---
 
-## 6. 排错索引
+## 6. Troubleshooting Index
 
-| 看到什么 | 去哪一节 |
+| What you see | Where to go |
 |---|---|
-| `Duplicate package names not supported` | 坑 #1 |
-| `-Werror=maybe-uninitialized` 指向 `return {};` | 坑 #2（换 GCC 11） |
-| `Could NOT find CUDA: ... required is exact version` | 坑 #3 / 第 5 节 |
-| `cudaStreamGetDevice was not declared` | 坑 #4（装 CUDA 12.8） |
-| `/usr/local/cuda` 版本与报错不符 | 坑 #5（清构建树） |
-| `gpg: unsafe ownership on homedir` | 坑 #6 |
-| `install/` 里 `.so` 只有 92 字节 | 步骤 6 的说明（跟进 symlink） |
-| `dlopen error: libcudart.so.12: cannot open shared object file` | 坑 #7 / 步骤 7（ld 缓存 + `LD_LIBRARY_PATH`） |
-| `not found: ".../autoware_tensorrt_plugins/.../local_setup.bash"` | 坑 #8（spconv 缺失，可忽略） |
-| 话题静默无数据 / `IMU msg is timeout` / 三路雷达只有一路有 | 坑 #9 / 步骤 8（UDP 缓冲区 208 KB） |
-| `ros2 topic hz` 找不到明明在发的话题 | 坑 #10（加 `--no-daemon`） |
-| `cudaErrorCallRequiresNewerDriver (36)` | 坑 #11 / 第 5 节（`cuda_blackboard` 一行补丁） |
-| `pointcloud_container` 启动即死 / `No InputSource` / `align server failed` | 坑 #11（同上，这些都是下游症状） |
-| `tf2_buffer: Detected jump back in time` 刷屏 | 坑 #12（别用 `--loop`） |
-| 换 CycloneDDS 后节点大面积 `exit code -6` | 坑 #13（回退 FastDDS） |
-| `blockReduce`/`blockReduceKeyVal` 重载解析失败 | 第 5 节（OpenCV + nvcc 12.8 不兼容） |
+| `Duplicate package names not supported` | Pitfall #1 |
+| `-Werror=maybe-uninitialized` pointing at `return {};` | Pitfall #2 (switch to GCC 11) |
+| `Could NOT find CUDA: ... required is exact version` | Pitfall #3 / Section 5 |
+| `cudaStreamGetDevice was not declared` | Pitfall #4 (install CUDA 12.8) |
+| `/usr/local/cuda` version doesn't match the error message | Pitfall #5 (clean the build tree) |
+| `gpg: unsafe ownership on homedir` | Pitfall #6 |
+| The `.so` in `install/` is only 92 bytes | Step 6's note (follow the symlink) |
+| `dlopen error: libcudart.so.12: cannot open shared object file` | Pitfall #7 / Step 7 (ld cache + `LD_LIBRARY_PATH`) |
+| `not found: ".../autoware_tensorrt_plugins/.../local_setup.bash"` | Pitfall #8 (missing spconv, can be ignored) |
+| Topic silently has no data / `IMU msg is timeout` / only one of three lidars has data | Pitfall #9 / Step 8 (208 KB UDP buffer) |
+| `ros2 topic hz` can't find a topic that's clearly publishing | Pitfall #10 (add `--no-daemon`) |
+| `cudaErrorCallRequiresNewerDriver (36)` | Pitfall #11 / Section 5 (`cuda_blackboard` one-line patch) |
+| `pointcloud_container` dies on startup / `No InputSource` / `align server failed` | Pitfall #11 (same as above — these are all downstream symptoms) |
+| `tf2_buffer: Detected jump back in time` floods the log | Pitfall #12 (don't use `--loop`) |
+| Widespread `exit code -6` across nodes after switching to CycloneDDS | Pitfall #13 (revert to FastDDS) |
+| `blockReduce`/`blockReduceKeyVal` overload resolution fails | Section 5 (OpenCV + nvcc 12.8 incompatibility) |
 
 ---
 
-*本文所有版本号与结论均来自 2026-09-22 在 lz@192.168.8.3（AGX Orin 开发套件）上的实测。*
+*All version numbers and conclusions in this document come from measurements taken on 2026-09-22 on lz@192.168.8.3 (AGX Orin Developer Kit).*

@@ -1,9 +1,11 @@
 #!/bin/bash
-# 把本仓库自带的 nuway 包放进 src/，供 colcon 发现。
+# Copy the nuway packages bundled with this repository into src/ so colcon finds them.
 #
-# 为什么不直接放在 src/ 里：上游 autoware 元仓库的 src/.gitignore 是 `*`，
-# 即 src/ 按约定完全由 vcs import 生成；SOP 里也有 `rm -rf src` 重新 import
-# 的操作。把版本控制的包放进去会被误删，也与上游约定冲突。
+# Why they are not kept in src/ directly: the upstream autoware meta-repository ships a
+# src/.gitignore of `*`, meaning src/ is by convention generated entirely by vcs import,
+# and the SOP includes `rm -rf src` followed by a fresh import. Version-controlled
+# packages placed there would be deleted by that step and would also contradict the
+# upstream convention.
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$ROOT/src/nuway"

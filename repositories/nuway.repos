@@ -1,18 +1,22 @@
-# nUWAy (EZ10 Gen2) 专有仓库，与 autoware.repos 一同 import
+# Repositories specific to nUWAy (EZ10 Gen2), imported alongside autoware.repos:
 #   vcs import src < repositories/autoware.repos
 #   vcs import src < repositories/nuway.repos
 #
-# 注意：上游 autoware_on_nUWAy 的 nuway.repos 使用 git@lee.github.com: 这个
-# 自定义 SSH 别名，此处改为标准 URL，避免他人 clone 后无法 import。
+# Note: the nuway.repos in upstream autoware_on_nUWAy uses the custom SSH alias
+# git@lee.github.com:. It is spelled as a standard URL here so that anyone cloning this
+# repository can import it.
 repositories:
   nuway/nuway_canbridge:
     type: git
     url: git@github.com:uwa-rev/canbridge_cpp.git
     version: autoware
 
-# 说明：nuway_sensor_kit_launch 与 nuway_vehicle_launch 目前直接随本仓库
-# 分发（src/nuway/ 下），来源 uwa-rev/autoware_launch.nuway @ d11bea6 (2026-03-30)。
-# 未把整个 autoware_launch.nuway import 进来，是因为它同时包含一个 fork 版
-# autoware_launch，会与 1.9.0 自带的同名包冲突，导致 colcon
-# "Duplicate package names not supported" 直接中止、一个包都不编。
-# 建议后续把这两个包拆成独立仓库，再改用 vcs import 管理。
+# nuway_sensor_kit_launch and nuway_vehicle_launch currently ship with this repository
+# (under src/nuway/) rather than being imported. They come from
+# uwa-rev/autoware_launch.nuway @ d11bea6 (2026-03-30).
+# The whole of autoware_launch.nuway is deliberately not imported, because it also
+# contains a forked autoware_launch that collides with the package of the same name in
+# 1.9.0; colcon then aborts with "Duplicate package names not supported" and builds
+# nothing at all.
+# Splitting these two packages into their own repository, and managing them with vcs
+# import, would be the cleaner long-term arrangement.
