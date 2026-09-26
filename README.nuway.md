@@ -135,9 +135,19 @@ mis-declared dependencies rather than anything to do with the caster.
 `package.xml`, so rosdep never installed it. An earlier note here blamed apt for
 not carrying `mavros_msgs`, which was wrong on both counts.
 
-⚠ A previous revision of `config/ntrip-param.yaml` committed a real username and
-password. They are in this repository's history, where deleting the file does not
-reach them, so those credentials must be rotated.
+⚠ An early revision of `config/ntrip-param.yaml` committed a real username and
+password, and they remain in commit `2d3e8c9` - the first commit on this branch,
+and the only one that carries them. Deleting the file did not reach them.
+
+They were credentials for the `UWA_Campus` mountpoint on a caster that no longer
+exists, so there is no service left on which to change them. History was
+deliberately not rewritten: it would have renumbered twelve commits, force-pushed
+over published history, and still left the old objects reachable by SHA for a
+while. The exposure that remains is an email address and a password that must not
+be reused anywhere else.
+
+Credentials no longer enter the repository at all - `ntrip_launch.py` reads them
+from the environment.
 
 ## Known TODOs
 
