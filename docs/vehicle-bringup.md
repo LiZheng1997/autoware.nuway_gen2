@@ -31,9 +31,23 @@ Ethernet port.
 Orin        192.168.5.29     <- hard-coded as host_ip in lidar.launch.xml
 front lidar 192.168.5.28     data port 2369
 rear lidar  192.168.5.27     data port 2368
+NovAtel     192.168.5.41:2000  per uwa-rev/nUWAy_ros2_ws, may have moved
 MainPC      <to be confirmed>  runs canbridge, owns the CAN interface
 4G router   <to be confirmed>  also the default gateway
 ```
+
+Treat every address above as a starting guess, not a fact. Several come from a
+workspace last touched in August 2025 and nobody has confirmed they still hold.
+Find out rather than assume:
+
+```bash
+bash nuway/vehicle_preflight.sh --scan
+```
+
+That sweeps the subnet and probes each live host - port 80 for the Velodyne web
+interface, 2000 and 3001 for a NovAtel over TCP - then prints what answered.
+Feed the results back in through `GNSS_IP`, `LIDAR_FRONT`, `LIDAR_REAR` and
+`MAINPC_IP`.
 
 ```bash
 ROUTER_IP=<router> bash nuway/vehicle_preflight.sh --apply-net
@@ -101,3 +115,38 @@ other. Agreeing with each other matters more than being right in absolute terms.
 `nuway/replay/ndt_verify.sh` and `nuway/replay/collect_ndt.py` produce the
 localization numbers; see `docs/mapping-and-localization.md` for what they mean
 and which thresholds Autoware itself gates on.
+
+## 8. What the previous vehicle workspace already did
+
+`uwa-rev/nUWAy_ros2_ws`, branches `nuway3_humble` and `nuway4_humble`, is the
+Docker workspace that ran on the vehicle until August 2025. It is worth reading
+before rebuilding anything, because several open questions are already answered
+there.
+
+`src/master/launch/gps.launch.py` starts the NovAtel and the XSENS **together**:
+`novatel_gps_driver` as a composable node inside a `novatel_gps_container`, and
+`xsens_mti_ros2_driver` alongside it. So both have been integrated and run on
+this vehicle; the work here is wiring them into Autoware, not making them work.
+
+`src/master/config/novatel.yaml` shows how the receiver was reached:
+`connection_type: tcp`, `device: 192.168.5.41:2000`, `use_binary_messages: true`,
+`frame_id: gps`, `polling_period: 0.2`. That 5 Hz matches the rate of `/gps/fix`
+in the campus bag exactly.
+
+The `ntrip` package in this repository came from
+`src/Xsens_MTi_ROS_Driver_and_Ntrip_Client/src/ntrip/` in that workspace - the
+paths match file for file, which is why its package description mentions the
+Xsens driver.
+
+⚠ That workspace carries `MTi-680_Device_Settings.png`, and an MTi-680 is not an
+MTi-10. The 680 is a GNSS/INS with its own receiver and RTK support, which is
+what the bundled NTRIP client was there for. If the unit on the vehicle is a 680
+rather than a 10, there are two GNSS receivers aboard and the question of which
+one feeds Autoware, and which one takes the corrections, has to be settled before
+wiring anything. Check the label on the device.
+
+Also in that history: commit `0b6a5c1` turned `log_ekf_quat` back on in
+`sbg_params.yaml` and deleted an `imu_convertor.py` that had existed to work
+around a driver bug where enabling quaternion output silenced `imu/data`. Its own
+comment says "I don't know if below applies anymore", so if IMU data or
+orientation misbehaves on the SBG vehicle, start there.

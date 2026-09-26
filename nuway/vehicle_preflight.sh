@@ -4,6 +4,7 @@
 #
 #   bash nuway/vehicle_preflight.sh              check only
 #   bash nuway/vehicle_preflight.sh --apply-net  also move eth0 onto the vehicle network
+#   bash nuway/vehicle_preflight.sh --scan       sweep 192.168.5.0/24 and identify what answers
 #
 # ⚠ --apply-net drops every SSH session the moment the address changes, because
 #   the address is the one you are connected over. Run it from a local terminal.
@@ -16,6 +17,11 @@ IFACE=${IFACE:-eth0}
 LIDAR_FRONT=${LIDAR_FRONT:-192.168.5.28}
 LIDAR_REAR=${LIDAR_REAR:-192.168.5.27}
 VEHICLE_DOMAIN=${VEHICLE_DOMAIN:-5}
+# NovAtel FlexPak6 over TCP. This is what uwa-rev/nUWAy_ros2_ws used
+# (src/master/config/novatel.yaml, connection_type tcp), but it may have moved -
+# run --scan to find it rather than trusting this.
+GNSS_IP=${GNSS_IP:-192.168.5.41}
+GNSS_PORT=${GNSS_PORT:-2000}
 
 ok(){ printf "  \033[32m✓\033[0m %s\n" "$*"; }
 bad(){ printf "  \033[31m✗\033[0m %s\n" "$*"; FAIL=$((FAIL+1)); }
@@ -32,6 +38,34 @@ if [ "$1" = "--apply-net" ]; then
   sudo ip link set "$IFACE" up
   sudo ip route replace default via "$ROUTER_IP" dev "$IFACE"
   echo "Applied. This does not survive a reboot - create an nmcli connection to make it permanent."
+fi
+
+if [ "$1" = "--scan" ]; then
+  hdr "Sweeping ${SUBNET:-192.168.5}.0/24 - addresses are not assumed, they are discovered"
+  SUB=${SUBNET:-192.168.5}
+  for i in $(seq 1 254); do ping -c1 -W1 "$SUB.$i" >/dev/null 2>&1 && echo "$SUB.$i" & done | sort -t. -k4 -n > /tmp/.pf_hosts
+  wait 2>/dev/null
+  sort -t. -k4 -n -u /tmp/.pf_hosts | while read -r h; do
+    [ -z "$h" ] && continue
+    tags=""
+    for pp in "80:web" "2000:novatel-tcp" "3001:novatel-icom" "2101:ntrip-caster" "22:ssh"; do
+      port=${pp%%:*}; label=${pp#*:}
+      timeout 1 bash -c "exec 3<>/dev/tcp/$h/$port" 2>/dev/null && tags="$tags $label($port)"
+    done
+    guess=""
+    case "$h" in
+      *.27|*.28) guess="  <- lidar per lidar.launch.xml";;
+      *.29)      guess="  <- this Orin";;
+    esac
+    [ -n "$tags" ] && guess="$guess"
+    printf "  %-15s%s%s\n" "$h" "$tags" "$guess"
+  done
+  rm -f /tmp/.pf_hosts
+  echo
+  echo "  Velodyne units answer on 80. A NovAtel over TCP answers on its configured"
+  echo "  port, 2000 in the workspace this came from. Pass what you find back in as"
+  echo "  GNSS_IP / GNSS_PORT / LIDAR_FRONT / LIDAR_REAR / MAINPC_IP."
+  exit 0
 fi
 
 hdr "1. Network"
@@ -97,7 +131,10 @@ a=$(df -BG --output=avail / | tail -1 | tr -dc 0-9)
 [ "${a:-0}" -ge 100 ] && ok "${a}G free" || bad "only ${a}G free, clear space before recording"
 
 hdr "7. Sensor devices"
-ls /dev/ttyUSB* 2>/dev/null | sed "s/^/  /" || warn "no USB serial devices - GNSS and IMU not connected or not powered"
+timeout 3 bash -c "exec 3<>/dev/tcp/$GNSS_IP/$GNSS_PORT" 2>/dev/null \
+  && ok "NovAtel reachable at $GNSS_IP:$GNSS_PORT (novatel_gps_driver connection_type tcp)" \
+  || bad "nothing answers at $GNSS_IP:$GNSS_PORT - run --scan to find where the receiver moved"
+ls /dev/ttyUSB* 2>/dev/null | sed "s/^/  /" || warn "no USB serial devices - a serial-attached GNSS or the XSENS would appear here"
 ip -br link show can0 2>/dev/null | sed "s/^/  /"
 echo "  CAN runs on MainPC, so the Orin does not need can0."
 
