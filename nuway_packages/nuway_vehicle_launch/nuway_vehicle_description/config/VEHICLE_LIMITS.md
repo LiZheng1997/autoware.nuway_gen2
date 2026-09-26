@@ -43,3 +43,59 @@ longitudinal control clamping, steering-rate margins, and similar parameters.
 (only `max_steer_angle` differs). The two CAN documents are command manuals and don't include geometry,
 so they can't be used to verify this. To confirm, cross-check against `mirror.param.yaml` (lateral ±1.4 m, measured on the real vehicle)
 or measure the actual vehicle.
+
+## Steering mode: dual-axle, and deliberately not switchable
+
+The vehicle supports three steering modes. `nuway_can/include/nuway_can/can_drive.hpp`
+declares them:
+
+```cpp
+enum GearMode { FRONT = 1, REAR = 2, DUAL = 0 };
+```
+
+but the selection is commented out in `can_drive.cpp`, under the note
+`// Commenting Down GearMode selection for autoware`, and the angles are written
+unconditionally with opposite signs:
+
+```cpp
+convert_16_to_8(&front_msb, &front_lsb,  angular_scaled);
+convert_16_to_8(&rear_msb,  &rear_lsb,  -angular_scaled);
+```
+
+So under Autoware the vehicle always steers both axles in counter-phase. **Keep it
+that way.** The reasoning, so that nobody has to reconstruct it:
+
+**`max_steer_angle` is only valid for one mode.** The equivalence
+`δ_eq = atan(2·tanδ)` above assumes both axles steer. It does not hold otherwise:
+
+| Mode | Minimum radius | Equivalent single-track angle | Is `max_steer_angle: 0.70` right? |
+|---|---|---|---|
+| DUAL (current) | `L/(2·tanδ)` = 4.29 m | ≈ 0.576 rad | yes, same order, and vehicle-validated |
+| FRONT or REAR | `L/tanδ` = 8.59 m | 0.3141 rad | **no - overstates the vehicle by 2.2×** |
+
+**Autoware cannot change the vehicle model while running.**
+`vehicle_info.param.yaml` is resolved through
+`find-pkg-share $(var vehicle_model)_description` by the control, planning,
+perception and sensing components, each at launch. There is no runtime path to a
+different `wheel_base` or `max_steer_angle`. Supporting a mode switch therefore
+means either restarting the stack against a second vehicle model, or leaving the
+planner working from figures the vehicle cannot deliver.
+
+**The second option fails silently**, which is why it is worth stating as a rule
+rather than leaving to judgement. Nothing raises an error: the planner simply
+asks for curvature the vehicle cannot produce, and it shows up as persistent
+tracking lag, cutting corners, and in the worst case leaving the path.
+
+Dual is also the mode you want here on its own merits - half the turning radius,
+4.29 m against 8.59 m, which is what makes a turnaround possible in roughly 8.6 m
+of width instead of 17.2 m.
+
+If a single-axle mode is ever genuinely needed, for a docking manoeuvre say,
+handle it outside Autoware's control path rather than as a runtime switch inside
+the autonomous stack. And if the `GearMode` selection is ever restored, treat
+`max_steer_angle` as part of that change, not as a separate question.
+
+Note that the commented-out block still carries
+`// TODO: Double check the direction of the steering.` The current behaviour is
+what we want, but it arrived by someone disabling code they were unsure of rather
+than by decision - which is the reason for writing this down.
