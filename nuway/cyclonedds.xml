@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  CycloneDDS configuration for Autoware on the Orin.
+
+  Why this file exists: RMW_IMPLEMENTATION was never set, so Humble fell back to
+  rmw_fastrtps_cpp. This machine has 13 network interfaces (lo, wlan, can0/1, eth0,
+  l4tbr0, usb0/1, docker0, flannel.1, cni0 and two veth), and with
+  ROS_LOCALHOST_ONLY=0 the ~68 DDS participants of one Autoware launch discover each
+  other across all of them. Measured on 2026-10-04, at 1.0x replay:
+
+      rmw_fastrtps_cpp, all interfaces : 991% CPU (9.9 of 12 cores), 8 cores pegged
+                                         above 80%, planning chain never produced a
+                                         trajectory (dropped by scenario_selector's
+                                         1.0 s delay gate), 790 /dev/shm segments
+      rmw_cyclonedds_cpp, lo only      : 650% CPU (6.5 cores) with the full chain
+                                         live - trajectory 10.06 Hz, control_cmd
+                                         67.05 Hz, zero delay drops, no core above 80%
+
+  Nothing else was changed between those two runs.
+
+  NUWAY_DDS_IFACE selects the interface and is expanded by Cyclone at load time
+  (verified). Keep it at "lo" while every node runs on the Orin. If topics have to
+  reach MainPC, set it to that specific NIC (e.g. eth0) - the point is to name one
+  interface rather than let discovery fan out across all of them.
+-->
+<CycloneDDS xmlns="https://cdds.io/config">
+  <Domain id="any">
+    <General>
+      <Interfaces>
+        <NetworkInterface name="${NUWAY_DDS_IFACE}" priority="default" multicast="true"/>
+      </Interfaces>
+      <AllowMulticast>true</AllowMulticast>
+      <!-- Fragment below the 64 KB UDP limit; pointcloud frames are several MB. -->
+      <MaxMessageSize>65500B</MaxMessageSize>
+    </General>
+    <Internal>
+      <!-- Needs net.core.rmem_max raised as well - see nuway/60-autoware-dds.conf. -->
+      <SocketReceiveBufferSize min="10MB"/>
+      <Watermarks><WhcHigh>500kB</WhcHigh></Watermarks>
+    </Internal>
+  </Domain>
+</CycloneDDS>

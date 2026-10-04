@@ -21,3 +21,13 @@ if ! grep -q 'autoware_utils_diagnostics' "$CANB/nuway_can/package.xml"; then
 else
   echo "· canbridge dependency declarations already present"
 fi
+
+AWL="$ROOT/src/launcher/autoware_launch"
+[ -d "$AWL" ] || { echo "missing $AWL - run vcs import first"; exit 1; }
+if grep -q 'use_traffic_light_recognition" default="true"' \
+     "$AWL/autoware_launch/launch/components/tier4_perception_component.launch.xml"; then
+  patch -p1 -d "$AWL" < "$ROOT/patches/0003-perception-disable-traffic-light-recognition.patch"
+  echo "✔ traffic light recognition disabled by default"
+else
+  echo "· traffic light recognition already disabled"
+fi

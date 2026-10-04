@@ -27,10 +27,14 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import PointCloud2, PointField, Imu, NavSatFix
 from geometry_msgs.msg import TwistStamped
-from autoware_vehicle_msgs.msg import VelocityReport
+from autoware_vehicle_msgs.msg import VelocityReport, SteeringReport
+import math
 from builtin_interfaces.msg import Time as TimeMsg
 import sensor_msgs_py.point_cloud2 as pc2
 from tf2_ros import Buffer, TransformListener
+
+WHEEL_BASE = 2.79      # nuway_vehicle vehicle_info
+MAX_STEER = 0.70       # equivalent single-track limit
 
 # autoware::point_types::PointXYZIRC (verified against types.hpp)
 FIELDS = [
@@ -94,6 +98,14 @@ class Adapter(Node):
         self.pub_fix = self.create_publisher(NavSatFix, '/sensing/gnss/imu/nav_sat_fix', 10)
         self.pub_vel = self.create_publisher(
             VelocityReport, '/vehicle/status/velocity_status', 10)
+        # 4. Steering feedback. The bag has none at all (its only vehicle topic is
+        #    /can_twist_fb), and without /vehicle/status/steering_status the
+        #    trajectory_follower never leaves "Control is skipped since input data is
+        #    not ready" - the control chain emits nothing. Reconstructed below from
+        #    yaw rate and speed. THIS IS AN ESTIMATE, FOR OFFLINE REPLAY ONLY: on the
+        #    vehicle this must come from the real CAN feedback (0x193).
+        self.pub_steer = self.create_publisher(
+            SteeringReport, '/vehicle/status/steering_status', 10)
 
         for t in ('/lidar/velodyne/front/cloud', '/lidar/velodyne/rear/cloud'):
             self.create_subscription(PointCloud2, t,
@@ -221,6 +233,20 @@ class Adapter(Node):
         v.lateral_velocity = float(m.twist.linear.y)
         v.heading_rate = float(m.twist.angular.z)
         self.pub_vel.publish(v)
+
+        # Equivalent front-wheel angle from the bicycle model: omega = v*tan(d)/L.
+        # EZ10 steers both axles, but wheel_base / max_steer_angle in vehicle_info are
+        # already the equivalent single-track values, so the plain model is consistent
+        # with them. Below 0.3 m/s the denominator is not trustworthy.
+        s = SteeringReport()
+        s.stamp = v.header.stamp
+        vx, wz = v.longitudinal_velocity, v.heading_rate
+        if abs(vx) > 0.3:
+            d = math.atan(WHEEL_BASE * wz / vx)
+            s.steering_tire_angle = float(max(-MAX_STEER, min(MAX_STEER, d)))
+        else:
+            s.steering_tire_angle = 0.0
+        self.pub_steer.publish(s)
         self.n_vel += 1
 
     def report(self):

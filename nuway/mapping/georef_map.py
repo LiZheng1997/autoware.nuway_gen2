@@ -140,6 +140,20 @@ z0 = float(np.median(ground_points(P)[:, 2]))
 print(f'median ground height z0={z0:.2f} m -> translating to 0')
 
 os.makedirs(out_dir, exist_ok=True)
+
+# ---- export the driven trajectory in map frame (input for make_lanelet2.py) --------
+# Same transform chain the map points went through: Rlev (already applied to otraj
+# above) -> SE(2) R,t -> minus z0. Verified by regenerating pointcloud_map.pcd and
+# checking it is byte-identical to the map in use.
+traj_xy = otraj[:, :2] @ R.T + t
+traj_z = otraj[:, 2] - z0
+_traj = os.path.join(out_dir, 'traj_map.csv')
+with open(_traj, 'w') as fh:
+    fh.write('t,x,y,z\n')
+    np.savetxt(fh, np.c_[odo['t'], traj_xy, traj_z], delimiter=',', fmt='%.6f')
+print(f'wrote {_traj}: {len(otraj)} poses, '
+      f'{np.linalg.norm(np.diff(traj_xy, axis=0), axis=1).sum():.1f} m')
+
 out_pcd = os.path.join(out_dir, 'pointcloud_map.pcd')
 n = len(P)
 with open(out_pcd, 'w') as fh:

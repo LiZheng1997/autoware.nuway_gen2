@@ -1,0 +1,23 @@
+Campus operation has no traffic lights and the vehicle carries no camera into this
+pipeline, yet the two traffic_light containers still ran at 47% CPU each. Turning the
+module off measured: load 29.4 -> 20.6, RViz 3 -> 5 fps, and obstacle_segmentation
+recovered from publishing nothing to 2.147 Hz (it had been starved of CPU). The whole
+traffic-light subtree - arbiter, crosswalk_estimator, map_based_detector,
+multi_camera_fusion - drops to zero nodes, with no process deaths.
+
+use_traffic_light_recognition is not exposed through autoware.launch.xml or
+logging_simulator.launch.xml, so the default in the component launch file is the only
+place to change it. Re-enable by passing use_traffic_light_recognition:=true if a
+camera-equipped route ever needs it.
+
+--- a/autoware_launch/launch/components/tier4_perception_component.launch.xml
++++ b/autoware_launch/launch/components/tier4_perception_component.launch.xml
+@@ -35,7 +35,7 @@
+   <arg name="use_roi_detected_object_validator" default="true" description="if true, detected objects are validated by ROI and camera-lidar fusion results are filtered accordingly"/>
+   <arg name="use_semantic_segmentation_ptv3" default="false" description="use semantic segmentation ptv3 for ground segmentation"/>
+   <arg name="use_empty_dynamic_object_publisher" default="false" description="if true, /perception/object_recognition/objects topic has an empty DynamicObjectArray"/>
+-  <arg name="use_traffic_light_recognition" default="true" description="use traffic light recognition module, if false, traffic light recognition module will not be launched"/>
++  <arg name="use_traffic_light_recognition" default="false" description="use traffic light recognition module, if false, traffic light recognition module will not be launched"/>
+ 
+   <arg name="use_low_height_cropbox" default="false" description="use low height crop filter in clustering"/>
+   <arg name="use_vector_map" default="true" description="use vector map in prediction"/>
