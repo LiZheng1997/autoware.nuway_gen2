@@ -74,6 +74,89 @@ CenterPoint, ground segmentation and the EKF all keep full frame rate — see
 - [ ] Re-check that `max_steer_angle` (equivalent single-track) and the CAN physical
       limit of ±0.3141 rad stay consistent on the real vehicle.
 
+## The kinematic model does not match the vehicle (found 2026-10-04)
+
+Autoware's lateral controller runs `vehicle_model_type: "kinematics"`, whose core line is
+
+```cpp
+// autoware_mpc_lateral_controller/src/vehicle_model/vehicle_model_bicycle_kinematics.cpp
+double delta_r = atan(m_wheelbase * m_curvature);     // delta = atan(L * kappa)
+```
+
+That is the ordinary front-steer bicycle model, referenced to the **rear axle**. EZ10 steers
+both axles at equal and opposite angles, so its geometry is `R = L / (2*tan d)` and the
+point that follows the path is the **vehicle centre**, not the rear axle.
+
+The capability this buys is real: at the CAN limit of 0.3141 rad the minimum turning radius
+is `2.79 / (2*tan 0.3141) = 4.26 m`, where a front-steer vehicle of the same wheelbase
+would need 8.51 m. But for a *given* target curvature the physical angle each wheel needs is
+**smaller**, not larger:
+
+```
+target curvature kappa
+  Autoware (front-steer model)  d_aw   = atan(L*kappa)
+  EZ10 needs (dual-axle)        d_phys = atan(L*kappa / 2)
+  hence  tan(d_phys) = tan(d_aw) / 2,  d_phys < d_aw
+```
+
+### The conversion is missing in the bridge
+
+`nuway_can/src/can_drive.cpp` takes Autoware's command straight through:
+
+```
+156  angular_ = msg->lateral.steering_tire_angle;   // equivalent single-track angle
+237  selected_angular_ = -selected_angular_;
+241  clamp to +/-0.28 rad                            // MAX_ANGULAR_VALUE
+247  rate limit rad_per_frame_ = 0.004 per frame @ 50 Hz
+258  angular_scaled = angular_target * 10000
+267  front =  angular_scaled
+268  rear  = -angular_scaled                         // opposite signs, correct
+```
+
+No division by two anywhere. The equivalent single-track angle is written into the physical
+wheel setpoint, so the vehicle turns at roughly twice the intended curvature. The error is
+not a constant scale, it changes sign across the clamp:
+
+| commanded d_aw | what the vehicle does |
+|---|---|
+| below 0.28 rad | curvature about 2x the request - turns too tightly |
+| above 0.28 rad | saturates at 0.28 -> R about 4.84 m, while Autoware assumes d=0.70 means R about 3.30 m - turns too wide |
+
+### Command and feedback use different conventions
+
+`nuway_can/src/can_status.cpp:188` reports
+
+```cpp
+steer.steering_tire_angle = (-front + rear) / 2.0;
+```
+
+which is the **physical** wheel angle, while Autoware expects `steering_status` in the same
+convention as its command (equivalent single-track), i.e. about twice as large. The MPC will
+read "commanded 0.2, measured 0.1" as steering lag and keep increasing the command - a
+positive feedback that pushes the angle toward saturation.
+
+### One coincidence worth knowing
+
+`rad_per_frame_ = 0.004` at 50 Hz is exactly 0.2 rad/s, which is exactly the rate that
+triggers a vehicle-level emergency stop. This is the limiter that actually binds (not
+`vehicle_cmd_gate`, which permits 1.0 rad/s), but it leaves no margin at all.
+
+### This needs reconciling before it is treated as a defect
+
+`canbridge_cpp@autoware` is recorded as having run on the real vehicle, and the
+planning-control chain of `autoware_on_nUWAy` as having driven. The code reads as above.
+Either the error stayed small enough to go unnoticed at 1.3 m/s with gentle curvature, or
+"ran on the vehicle" meant something short of closed-loop path tracking, or there is
+compensation somewhere this analysis has not found. Ask before changing anything.
+
+- [ ] **Bench test that settles it.** With the vehicle powered and the driven wheels off the
+      ground or otherwise safe, command a known `steering_tire_angle` and read back both the
+      raw CAN front/rear setpoints and `/vehicle/status/steering_status`. That measures the
+      command convention and the feedback convention in one go, without moving the vehicle.
+- [ ] **Constant-radius drive.** At low speed in a clear area, command a fixed curvature and
+      measure the actual turning radius. If it comes out at half the requested radius, the
+      missing factor of two is confirmed.
+
 ## Steering limits do not match the vehicle (found 2026-10-04)
 
 `VEHICLE_LIMITS.md` records that a steering rate above **+0.20 rad/s triggers a full
